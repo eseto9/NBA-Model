@@ -70,7 +70,7 @@ SCHED = ["x_travel", "x_tz", "x_dense", "x_load7", "x_altitude"]   # round2 adds
 
 
 def design(d, cols, market_input):
-    X = nba.lab_features(d)[cols]
+    X = nba.lab_features(d).assign(d_lu_rapm=d.d_lu_rapm.fillna(0).values if "d_lu_rapm" in d else 0)[cols]
     if market_input:
         X = X.assign(mkt_logit=np.log(d.p_market / (1 - d.p_market)))
     return X
@@ -100,12 +100,26 @@ def report(name, r):
     return {"variant": name, **s}
 
 
+def add_rapm(g):
+    """Walk-forward lineup RAPM (d_lu_rapm) for every game."""
+    import rapm
+    st, ath = rapm.load_stints()
+    st = rapm.prepare(st, rapm.athlete_ids(ath))
+    pg = nba.load_players()[0]
+    lu, _ = rapm.history(pg, st)
+    for side, sfx in (("home", "_h"), ("away", "_a")):
+        g = g.merge(lu.rename(columns={"team_id": f"{side}_id", "lu_rapm": f"lu_rapm{sfx}"}), on=["game_id", f"{side}_id"], how="left")
+    return g.assign(d_lu_rapm=(g.lu_rapm_h - g.lu_rapm_a).fillna(0))
+
+
 def main():
     coefs, b0 = fit_tpi(players.load_player_games(nba.data_files("players"), nba.GAME_TYPES))
     print("TPI coefficients (per 100 poss):", coefs, "intercept", b0)
-    g = load()
+    g = add_rapm(load())
     base = list(nba.features(g.head(1)).columns)
     variants = {
+        "+ RAPM (lineup data)": base + ["d_lu_rapm"],
+        "+ RAPM + TPI": base + ["d_lu_rapm", "d_lu_tpi"],
         "default model": base,
         "+ TPI": base + ["d_lu_tpi"],
         "+ schedule/travel": base + SCHED,
@@ -115,6 +129,7 @@ def main():
     }
     rows = [report(name, walk_forward(g, cols, market_input=name.startswith("market"))) for name, cols in variants.items()]
     rows.append(report("stack: market + model", stacked(walk_forward(g, base), g)))
+    rows.append(report("stack: market + model w/ RAPM", stacked(walk_forward(g, base + ["d_lu_rapm"]), g)))
     pd.DataFrame(rows).to_csv(ROOT / "log" / "experiments.csv", index=False)
 
 

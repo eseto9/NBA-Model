@@ -218,7 +218,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 4        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 5        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():

@@ -8,6 +8,8 @@ onto NBA ids so ratings carry over:
   data/espn/<season>/<date>.games.csv     one row per team per game
   data/espn/<season>/<date>.players.csv   one row per player per game
   data/espn/<season>/<date>.odds.csv      betting lines ESPN shows for each game (pickcenter)
+  data/espn/<season>/<date>.stints.csv    lineup stints from the play-by-play (stints.py)
+  data/espn/<season>/<date>.athletes.csv  ESPN athletes in each game, for mapping stints to players
   data/espn/ids.csv                       ESPN athlete id -> NBA player id
 """
 import datetime as dt
@@ -17,9 +19,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
+import stints
+
 BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 ET = ZoneInfo("America/New_York")
-ABBR = {"GS": "GSW", "NY": "NYK", "SA": "SAS", "NO": "NOP", "UTAH": "UTA", "WSH": "WAS"}
+ABBR = {"GS": "GSW", "NY": "NYK", "SA": "SAS", "NO": "NOP", "UTAH": "UTA", "WSH": "WAS", "NJ": "BKN"}
 TYPE_PREFIX = {2: "002", 3: "004", 5: "005"}       # regular season, playoffs, play-in
 FINAL_STATES = {"STATUS_FINAL", "STATUS_POSTPONED", "STATUS_CANCELED"}
 TEAM_COLS = ["SEASON_ID", "TEAM_ID", "TEAM_ABBREVIATION", "TEAM_NAME", "GAME_ID", "GAME_DATE", "MATCHUP", "WL",
@@ -104,7 +108,7 @@ def split(v):
 
 
 def box_score(ev, team_ids, team_names, ids):
-    """(team rows, player rows, betting lines) for one final game, in NBA log layout."""
+    """(team rows, player rows, betting lines, lineup stints, athletes) for one final game."""
     gid, day = game_id(ev), et_day(ev["date"])
     season_start = ev["season"]["year"] - 1
     comp = ev["competitions"][0]
@@ -161,7 +165,10 @@ def box_score(ev, team_ids, team_names, ids):
             **{k: int(mine[k].sum()) for k in ("FGM", "FGA", "FG3M", "FTM", "FTA", "OREB", "DREB")},
             "TOV": teams.get(abbr, {}).get("tov") or int(mine.TOV.sum()),
         })
-    return pd.DataFrame(trows, columns=TEAM_COLS), p.reindex(columns=PLAYER_COLS + ["FG3M"]), lines
+    st, ath = stints.parse(summary, ev["id"])
+    for a in ath:
+        a["date"] = f"{day:%Y-%m-%d}"
+    return pd.DataFrame(trows, columns=TEAM_COLS), p.reindex(columns=PLAYER_COLS + ["FG3M"]), lines, st, ath
 
 
 def update(live_dir, season, team_ids, team_names, known_players, through=None):
@@ -179,13 +186,17 @@ def update(live_dir, season, team_ids, team_names, known_players, through=None):
             events = [e for e in scoreboard(day) if game_id(e)]
             if all(e["status"]["type"]["name"] in FINAL_STATES for e in events):
                 tframes, pframes = [pd.DataFrame(columns=TEAM_COLS)], [pd.DataFrame(columns=PLAYER_COLS + ["FG3M"])]
-                lines = []
+                lines, st, ath = [], [], []
                 for e in events:
                     if e["status"]["type"]["name"] == "STATUS_FINAL":
-                        t, p, game_lines = box_score(e, team_ids, team_names, ids)
+                        t, p, game_lines, game_st, game_ath = box_score(e, team_ids, team_names, ids)
                         tframes.append(t)
                         pframes.append(p)
                         lines += game_lines
+                        st += game_st
+                        ath += game_ath
+                stints.frame(st).to_csv(sdir / f"{day}.stints.csv", index=False)
+                pd.DataFrame(ath, columns=["espn_id", "athlete", "name", "side", "team", "date"]).to_csv(sdir / f"{day}.athletes.csv", index=False)
                 pd.DataFrame(lines, columns=["date", "home", "away", "provider", "home_ml", "away_ml"]).to_csv(sdir / f"{day}.odds.csv", index=False)
                 pd.concat(pframes).to_csv(ppath, index=False)
                 pd.concat(tframes).to_csv(gpath, index=False)   # written last: marks the day complete
