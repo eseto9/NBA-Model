@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
   pages: write
@@ -19,6 +20,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main          # the daily job's fresh commit, not the commit that triggered it
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -6,7 +6,6 @@ minutes. A team's strength for a game is the expected-minutes-weighted average
 rating of the players available for it: for past games, the players who
 actually played; for upcoming games, the current roster minus the injury report.
 """
-import datetime as dt
 import re
 import time
 import unicodedata
@@ -23,11 +22,6 @@ LINEUP_SIZE = 10         # top players by expected minutes that make up the line
 DTD_WEIGHT = 0.5         # day-to-day players count for half their expected minutes
 METRICS = ["pie", "net", "gmsc"]
 
-BASE_COLS = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GAME_ID", "GAME_DATE", "MIN", "PTS", "FGM", "FGA",
-             "FTM", "FTA", "OREB", "DREB", "AST", "STL", "BLK", "TOV", "PF", "PLUS_MINUS"]
-ADV_COLS = ["PLAYER_ID", "GAME_ID", "NET_RATING", "PIE", "USG_PCT", "TS_PCT"]
-
-
 def call(make, label, tries=4):
     for attempt in range(tries):
         try:
@@ -41,37 +35,42 @@ def call(make, label, tries=4):
 # ---------------------------------------------------------------- data
 
 def fetch_season(season, season_types):
-    """Player box scores (base + advanced) for one season."""
+    """Player box scores for one season from stats.nba.com."""
     from nba_api.stats.endpoints import playergamelogs
 
     frames = []
     for st in season_types:
-        parts = {}
-        for mt in ("Base", "Advanced"):
-            parts[mt] = call(lambda: playergamelogs.PlayerGameLogs(
-                season_nullable=season, season_type_nullable=st,
-                measure_type_player_game_logs_nullable=mt, timeout=120,
-            ).get_data_frames()[0], f"players {season} {st} {mt}")
-            time.sleep(0.7)
-        if parts["Base"].empty:
-            continue
-        frames.append(parts["Base"][BASE_COLS].merge(parts["Advanced"][ADV_COLS], on=["PLAYER_ID", "GAME_ID"], how="left"))
+        frames.append(call(lambda: playergamelogs.PlayerGameLogs(
+            season_nullable=season, season_type_nullable=st, timeout=120,
+        ).get_data_frames()[0], f"players {season} {st}"))
+        time.sleep(0.7)
     return pd.concat(frames, ignore_index=True)
 
 
-def load_player_games(data_dir, game_types):
-    files = sorted(data_dir.glob("players_*.csv"))
+def load_player_games(files, game_types):
     if not files:
-        raise SystemExit("No player data yet - run: python nba.py fetch")
-    pg = pd.concat([pd.read_csv(f, dtype={"GAME_ID": str}) for f in files], ignore_index=True)
+        raise SystemExit("No player data yet - run: python nba.py fetch-history, then python nba.py update")
+    pg = pd.concat([pd.read_csv(f, dtype={"GAME_ID": str}) for f in files if f.stat().st_size > 200], ignore_index=True)
     pg = pg[(pg.MIN > 0) & pg.GAME_ID.str[:3].isin(game_types)].drop_duplicates(["PLAYER_ID", "GAME_ID"])
     pg["GAME_DATE"] = pd.to_datetime(pg.GAME_DATE.str[:10])
+    return add_metrics(pg).sort_values(["PLAYER_ID", "GAME_DATE", "GAME_ID"]).reset_index(drop=True)
+
+
+def add_metrics(pg):
+    """Advanced metrics computed from the base box score alone, so any box-score source works."""
     gmsc = (pg.PTS + 0.4 * pg.FGM - 0.7 * pg.FGA - 0.4 * (pg.FTA - pg.FTM) + 0.7 * pg.OREB
             + 0.3 * pg.DREB + pg.STL + 0.7 * pg.AST + 0.7 * pg.BLK - 0.4 * pg.PF - pg.TOV)
-    pg["pie"] = pg.PIE
-    pg["net"] = pg.NET_RATING.clip(-100, 100)
     pg["gmsc"] = 36 * gmsc / pg.MIN      # Hollinger game score per 36 minutes
-    return pg.sort_values(["PLAYER_ID", "GAME_DATE", "GAME_ID"]).reset_index(drop=True)
+    # PIE: the player's share of all box-score events in the game (NBA.com definition)
+    events = (pg.PTS + pg.FGM + pg.FTM - pg.FGA - pg.FTA + pg.DREB + 0.5 * pg.OREB
+              + pg.AST + pg.STL + 0.5 * pg.BLK - pg.PF - pg.TOV)
+    pg["pie"] = events / events.groupby(pg.GAME_ID).transform("sum")
+    # on-court net rating, estimated from plus-minus over the possessions he was on the floor
+    team = pg.groupby(["GAME_ID", "TEAM_ID"])[["FGA", "OREB", "TOV", "FTA"]].transform("sum")
+    team_poss = team.FGA - team.OREB + team.TOV + 0.44 * team.FTA
+    game_poss = team_poss.groupby(pg.GAME_ID).transform("mean")
+    pg["net"] = (100 * pg.PLUS_MINUS / (game_poss * pg.MIN / 48)).clip(-100, 100)
+    return pg
 
 
 # ---------------------------------------------------------------- ratings
@@ -127,23 +126,6 @@ def norm_name(name):
     name = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().lower()
     name = re.sub(r"[^a-z ]", "", name.replace("-", " "))
     return " ".join(w for w in name.split() if w not in ("jr", "sr", "ii", "iii", "iv"))
-
-
-def fetch_rosters(season, team_ids, cache_dir):
-    from nba_api.stats.endpoints import commonteamroster
-
-    path = cache_dir / f"rosters_{dt.date.today():%Y-%m-%d}.csv"
-    if path.exists():
-        return pd.read_csv(path)
-    frames = []
-    for t in team_ids:
-        frames.append(call(lambda: commonteamroster.CommonTeamRoster(
-            team_id=t, season=season, timeout=60).get_data_frames()[0], f"roster {t}"))
-        time.sleep(0.6)
-    r = pd.concat(frames, ignore_index=True)[["TeamID", "PLAYER", "PLAYER_ID"]]
-    r.columns = ["team_id", "PLAYER_NAME", "PLAYER_ID"]
-    r.to_csv(path, index=False)
-    return r
 
 
 def fetch_injuries():

@@ -1,6 +1,6 @@
 """Builds the website's data (site/data/*.json) from the model.
 
-Run once a day after the night's last game:
+Run once a day after the night's last game (the daily GitHub Actions job does this):
   python export.py                 # refresh data, retrain, predict the next slate
   python export.py --date 2026-10-25 --no-refresh
 
@@ -168,7 +168,8 @@ def update_log(slate, now):
     LOG.parent.mkdir(exist_ok=True)
     log = pd.read_csv(LOG, dtype={"game_id": str}) if LOG.exists() else pd.DataFrame(
         columns=["game_id", "date", "away", "home", "p_home", "logged_at"])
-    new = slate[~slate.game_id.isin(log.game_id)]
+    key = lambda d: d.date.astype(str).str[:10] + d.home + d.away
+    new = slate[~key(slate).isin(key(log))]
     if len(new):
         add = pd.DataFrame({"game_id": new.game_id, "date": new.date.dt.strftime("%Y-%m-%d"), "away": new.away,
                             "home": new.home, "p_home": new.home_win_prob.round(4), "logged_at": now})
@@ -218,8 +219,7 @@ def backtest_season(g, season):
 def main(date=None, refresh=True):
     now = dt.datetime.now(ET)
     start = pd.Timestamp(date or now.date())
-    if refresh:
-        nba.fetch()
+    pending = nba.update() if refresh else []
     rated = nba.load_players()
     hist = nba.build(rated=rated)
     models = nba.fit_final(nba.training_rows(hist))
@@ -240,8 +240,9 @@ def main(date=None, refresh=True):
 
     # record: frozen live picks plus last season's walk-forward backtest
     log = update_log(slate, now.isoformat(timespec="minutes"))
-    res = g[g.home_pts.notna()][["game_id", "home_pts", "away_pts"]]
-    graded = log.merge(res, on="game_id", how="left")
+    # graded by date and teams: ids changed source once (stats.nba.com -> ESPN)
+    res = g[g.home_pts.notna()].assign(date=lambda d: d.date.dt.strftime("%Y-%m-%d"))[["date", "home", "away", "home_pts", "away_pts"]]
+    graded = log.merge(res, on=["date", "home", "away"], how="left")
     done = graded[graded.home_pts.notna()]
     y = (done.home_pts > done.away_pts).astype(int)
     picks = [{"id": x.game_id, "date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home),
@@ -296,9 +297,7 @@ def main(date=None, refresh=True):
         "last_results_date": f"{played.date.max():%Y-%m-%d}",
     })
     print(f"Wrote site data: {len(games)} games on {slate_day:%Y-%m-%d}" if games else "Wrote site data: no upcoming games")
-    # games that should be final by now but have no box score yet (stats feed lags, or postponed)
-    missing = g[(g.season == season) & (g.date < start) & g.home_pts.isna()]
-    return missing.game_id.tolist()
+    return [str(d) for d in pending]      # days whose games weren't final yet
 
 
 if __name__ == "__main__":
@@ -309,5 +308,5 @@ if __name__ == "__main__":
     a = ap.parse_args()
     missing = main(a.date, refresh=not a.no_refresh)
     if missing:
-        print(f"{len(missing)} past games have no box score yet: {', '.join(missing)}")
+        print(f"Box scores not final yet for: {', '.join(missing)}")
         sys.exit(3)

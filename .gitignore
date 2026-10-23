@@ -1,5 +1,3 @@
-data/
 models/
 predictions/
 __pycache__/
-log/daily.log

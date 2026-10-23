@@ -26,10 +26,12 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+import espn
 import players
 
 ROOT = Path(__file__).parent
 DATA, MODELS, PREDS = ROOT / "data", ROOT / "models", ROOT / "predictions"
+HIST, LIVE = DATA / "nba", DATA / "espn"     # past seasons (stats.nba.com) / season in progress (ESPN)
 FIRST_SEASON = 2010          # 2010-11; first season is used only to warm up Elo/form
 GAME_TYPES = ("002", "004", "005", "006")  # regular season, playoffs, play-in, cup final
 SEASON_TYPES = ("Regular Season", "PlayIn", "Playoffs")
@@ -50,16 +52,16 @@ def current_season(today=None):
 
 # ---------------------------------------------------------------- data
 
-def fetch():
+def fetch_history():
+    """Past seasons from stats.nba.com, stored once in data/nba. Needs a home connection:
+    stats.nba.com blocks cloud servers. The season in progress comes from ESPN (update)."""
     from nba_api.stats.endpoints import leaguegamefinder
 
-    DATA.mkdir(exist_ok=True)
-    cur = current_season()
-    for y in range(FIRST_SEASON, cur + 1):
+    HIST.mkdir(parents=True, exist_ok=True)
+    for y in range(FIRST_SEASON, current_season()):
         for kind in ("games", "players"):
-            path = DATA / f"{kind}_{y}.csv"
-            # Past seasons are cached once they were fetched after that season ended.
-            if y < cur and path.exists() and dt.date.fromtimestamp(path.stat().st_mtime) > dt.date(y + 1, 10, 15):
+            path = HIST / f"{kind}_{y}.csv.gz"
+            if path.exists():
                 continue
             if kind == "players":
                 out = players.fetch_season(season_str(y), SEASON_TYPES)
@@ -72,15 +74,47 @@ def fetch():
                     ).get_data_frames()[0], f"{season_str(y)} {st}"))
                     time.sleep(0.7)
                 out = pd.concat(frames, ignore_index=True)
-            out.to_csv(path, index=False)
+            save_history(out, kind, path)
             print(f"{season_str(y)}: {out.GAME_ID.nunique()} games ({kind})")
 
 
+def save_history(df, kind, path):
+    cols = espn.TEAM_COLS if kind == "games" else espn.PLAYER_COLS + ["FG3M"]
+    df = df[[c for c in cols if c in df.columns]].copy()
+    df["GAME_DATE"] = df.GAME_DATE.astype(str).str[:10]
+    if "MIN" in df:
+        df["MIN"] = df.MIN.round(2)
+    df.to_csv(path, index=False, compression="gzip")
+
+
+def data_files(kind):
+    return sorted(HIST.glob(f"{kind}_*.csv.gz")) + sorted(LIVE.glob(f"*/*.{kind}.csv"))
+
+
+def known_players():
+    """Each NBA player's latest appearance, for mapping ESPN athletes onto NBA ids."""
+    cols = ["PLAYER_ID", "PLAYER_NAME", "GAME_DATE"]
+    p = pd.concat([pd.read_csv(f, usecols=cols) for f in data_files("players")], ignore_index=True)
+    p["GAME_DATE"] = pd.to_datetime(p.GAME_DATE)
+    return p.sort_values("GAME_DATE").drop_duplicates("PLAYER_ID", keep="last")
+
+
+def team_maps():
+    tg = load_team_games().sort_values("GAME_DATE").drop_duplicates("TEAM_ID", keep="last")
+    return dict(zip(tg.TEAM_ABBREVIATION, tg.TEAM_ID)), dict(zip(tg.TEAM_ABBREVIATION, tg.TEAM_NAME))
+
+
+def update():
+    """Add the season in progress, day by day, from ESPN."""
+    ids, names = team_maps()
+    return espn.update(LIVE, current_season(), ids, names, known_players())
+
+
 def load_team_games():
-    files = sorted(DATA.glob("games_*.csv"))
+    files = data_files("games")
     if not files:
-        raise SystemExit("No data yet - run: python nba.py fetch")
-    tg = pd.concat([pd.read_csv(f, dtype={"GAME_ID": str}) for f in files], ignore_index=True)
+        raise SystemExit("No data yet - run: python nba.py fetch-history, then python nba.py update")
+    tg = pd.concat([pd.read_csv(f, dtype={"GAME_ID": str}) for f in files if f.stat().st_size > 200], ignore_index=True)
     tg = tg[tg.WL.notna() & tg.GAME_ID.str[:3].isin(GAME_TYPES)]
     tg = tg.drop_duplicates(["GAME_ID", "TEAM_ID"])
     tg["GAME_DATE"] = pd.to_datetime(tg.GAME_DATE)
@@ -180,7 +214,7 @@ def add_form(games, box):
 
 def load_players():
     """Rated player-games plus each player's latest state and newcomer priors."""
-    return players.rate_players(players.load_player_games(DATA, GAME_TYPES))
+    return players.rate_players(players.load_player_games(data_files("players"), GAME_TYPES))
 
 
 def add_lineups(games, lineups):
@@ -291,39 +325,18 @@ def train():
     return models
 
 
-def load_schedule(season):
-    from nba_api.stats.endpoints import scheduleleaguev2
-
-    sch = scheduleleaguev2.ScheduleLeagueV2(season=season_str(season), timeout=60).get_data_frames()[0]
-    sch = sch[sch.gameId.str[:3].isin(GAME_TYPES) & (sch.homeTeam_teamId > 0)]
-    return pd.DataFrame({
-        "game_id": sch.gameId,
-        "date": pd.to_datetime(sch.gameDate, format="%m/%d/%Y %H:%M:%S"),
-        "season": season,
-        "home_id": sch.homeTeam_teamId, "away_id": sch.awayTeam_teamId,
-        "home": sch.homeTeam_teamTricode, "away": sch.awayTeam_teamTricode,
-        "home_name": sch.homeTeam_teamCity + " " + sch.homeTeam_teamName,
-        "away_name": sch.awayTeam_teamCity + " " + sch.awayTeam_teamName,
-        "tip": sch.gameDateTimeEst.str[:16],   # US Eastern wall time
-
-        "home_pts": np.nan, "away_pts": np.nan,
-        "neutral": sch.isNeutral.fillna(False).astype(bool),
-    })
-
-
 def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     """All games through `end` with features; unplayed ones use current rosters and injuries.
     Returns (games, window of games in [start, end) with home_win_prob, roster, unmatched injury names)."""
     season = current_season(start.date())
-    sched = load_schedule(season)
-    # include every scheduled game up to the window so rest days are right
-    sched = sched[sched.date < end]
+    team_ids, team_names = team_maps()
+    sched = espn.schedule(start.date(), end.date(), season, team_ids, team_names)
 
     # unplayed games: current roster minus the injury report
     rated = rated or load_players()
     _, latest, priors = rated
     unplayed = sched[~sched.game_id.isin(load_team_games().GAME_ID)]
-    roster = players.fetch_rosters(season_str(season), sorted(set(sched.home_id) | set(sched.away_id)), DATA)
+    roster = espn.rosters(LIVE, team_ids, known_players())
     injuries = players.fetch_injuries()
     roster, unmatched = players.availability(roster, injuries, force_out, force_in)
     lineups, roster = players.upcoming_lineups(unplayed, roster, latest, priors)
@@ -340,7 +353,7 @@ def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
 
 def predict(date=None, days=1, refresh=True, force_out=(), force_in=()):
     if refresh:
-        fetch()
+        update()
     start = pd.Timestamp(date or dt.date.today())
     end = start + pd.Timedelta(days=days)
     _, window, roster, unmatched = prepare(start, end, force_out, force_in)
@@ -380,7 +393,7 @@ def predict(date=None, days=1, refresh=True, force_out=(), force_in=()):
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # accented player names on Windows consoles
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["fetch", "backtest", "train", "predict"])
+    ap.add_argument("command", choices=["fetch-history", "update", "backtest", "train", "predict"])
     ap.add_argument("--date", help="first date to predict (default: today)")
     ap.add_argument("--days", type=int, default=1, help="number of days to predict")
     ap.add_argument("--no-refresh", action="store_true", help="predict without re-fetching data")
@@ -388,8 +401,10 @@ if __name__ == "__main__":
     ap.add_argument("--in", dest="force_in", default="", help="comma-separated players to treat as playing")
     a = ap.parse_args()
     names = lambda s: [n.strip() for n in s.split(",") if n.strip()]
-    if a.command == "fetch":
-        fetch()
+    if a.command == "fetch-history":
+        fetch_history()
+    elif a.command == "update":
+        update()
     elif a.command == "backtest":
         backtest()
     elif a.command == "train":

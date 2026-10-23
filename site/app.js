@@ -580,18 +580,18 @@ function viewHow() {
     <h1 style="font-size:clamp(36px,5vw,56px)">Who's playing<br><em>matters most.</em></h1>
     <p class="lede">Team ratings say how good a team has been. Tipoff also asks who will actually be on the floor tonight, and for how long.</p></div></section>
   <section class="steps">
-    <div class="step s1"><span class="n">01</span><h3>Rate every player</h3><p>PIE, on-court net rating and Game Score per 36, weighted by minutes and recency, pulled toward a newcomer's level until a player has a real sample.</p></div>
+    <div class="step s1"><span class="n">01</span><h3>Rate every player</h3><p>PIE, on-court net rating and Game Score per 36, computed from every box score and weighted by minutes and recency, pulled toward a newcomer's level until a player has a real sample.</p></div>
     <div class="step s2"><span class="n">02</span><h3>Build tonight's lineup</h3><p>Take today's roster, drop players listed as out, count day-to-day players at half their minutes, and weight everyone by projected minutes.</p></div>
     <div class="step s4"><span class="n">03</span><h3>Blend with team form</h3><p>Margin-adjusted Elo, recent offensive and defensive efficiency, four factors and rest feed a logistic regression trained on 19,000+ games.</p></div>
   </section>
   <div class="prose">
     <h2>The daily cycle</h2>
-    <p>Every morning, after the last game of the night is final, the model pulls the new box scores and retrains on every completed game since 2011. It then fetches the latest rosters and injury report and publishes a probability for each game on the next slate. Picks are frozen at publication and graded the following morning.</p>
+    <p>Every morning, after the last game of the night is final, a scheduled GitHub Actions job pulls the new box scores from ESPN and retrains on every completed game since 2011. It then fetches the latest rosters and injury report and publishes a probability for each game on the next slate. Picks are frozen at publication and graded the following morning.</p>
     <h2>Reading a game</h2>
     <p>The <b>tug-of-war bar</b> shows each team's win probability. Open a game for the <b>factor chart</b>, which starts at 50/50 and shows how home court, Elo, recent form, the available players and rest each move the line. These steps add up exactly to the final number. The <b>rotation</b> panel shows projected minutes; darker bars are better-rated players and hatched bars are players who are out or questionable.</p>
     <h2>Backtest, last six seasons</h2>
     <div class="card" style="margin-top:8px"><table><thead><tr><th>Model</th><th class="r">Accuracy</th><th class="r">Log loss</th></tr></thead><tbody>
-      <tr><td><b>Team + players (Tipoff)</b></td><td class="r mono">67.1%</td><td class="r mono">0.606</td></tr>
+      <tr><td><b>Team + players (Tipoff)</b></td><td class="r mono">67.5%</td><td class="r mono">0.606</td></tr>
       <tr><td>Team stats only</td><td class="r mono">65.3%</td><td class="r mono">0.624</td></tr>
       <tr><td>Elo only</td><td class="r mono">64.2%</td><td class="r mono">0.638</td></tr>
       <tr><td>Always pick the home team</td><td class="r mono">55.4%</td><td class="r mono">0.689</td></tr></tbody></table></div>
