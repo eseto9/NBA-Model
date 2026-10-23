@@ -21,8 +21,8 @@ from scipy.sparse.linalg import spsolve
 import nba
 import players
 
-LAMBDA = 2000.0          # ridge strength, in possessions
-HALFLIFE_DAYS = 365      # weight of older stints halves every year
+LAMBDA = 1000.0          # ridge strength, in possessions (tools/tune_rapm.py)
+HALFLIFE_DAYS = 730      # weight of older stints halves every two years
 WINDOW_SEASONS = 3       # this season plus the two before it
 HOME = "__home__"
 

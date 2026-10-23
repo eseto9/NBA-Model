@@ -5,7 +5,8 @@
 "use strict";
 
 const SCRATCH_KEY = "tipoff-scratches";
-const LINEUP_KEYS = { pie: "d_lu_pie", net: "d_lu_net", gmsc: "d_lu_gmsc", star: "d_lu_star", min: "d_lu_min" };
+const LINEUP_KEYS = { pie: "d_lu_pie", net: "d_lu_net", gmsc: "d_lu_gmsc", star: "d_lu_star", min: "d_lu_min", rapm: "d_lu_rapm" };
+const RAPM_REPLACEMENT = -2;      // rapm.REPLACEMENT: players with no lineup data yet
 
 function loadScratches() {
   try {
@@ -23,12 +24,12 @@ function lineupOf(side, useScratches) {
   const rows = side.rotation.map((p) => {
     const o = useScratches ? state.scratch[scratchKey(side, p)] : null;
     const avail = o === "out" ? 0 : o === "in" ? 1 : p.status === "Out" ? 0 : p.status === "Day-To-Day" ? 0.5 : 1;
-    return { ...p, w: p.min * avail };
+    return { ...p, rapm: p.rapm ?? RAPM_REPLACEMENT, w: p.min * avail };
   }).sort((a, b) => b.w - a.w).slice(0, 10);
   const W = rows.reduce((s, p) => s + p.w, 0) || 1;
   const avg = (k) => rows.reduce((s, p) => s + p.w * p[k], 0) / W;
   const stars = rows.filter((p) => p.w >= 20).map((p) => p.gmsc);
-  return { pie: avg("pie"), net: avg("net"), gmsc: avg("gmsc"), star: stars.length ? Math.max(...stars) : avg("gmsc"), min: W };
+  return { pie: avg("pie"), net: avg("net"), gmsc: avg("gmsc"), rapm: avg("rapm"), star: stars.length ? Math.max(...stars) : avg("gmsc"), min: W };
 }
 
 function applyScratches() {

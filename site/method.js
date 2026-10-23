@@ -9,7 +9,7 @@ const FEATURE_LABELS = {
   rest_h: "Home rest days", rest_a: "Away rest days", b2b_h: "Home back-to-back", b2b_a: "Away back-to-back",
   gp_min: "Games played (fewer of the two)", playoffs: "Playoff game", neutral: "Neutral site",
   d_lu_pie: "Lineup PIE", d_lu_net: "Lineup on-court net rating", d_lu_gmsc: "Lineup Game Score/36",
-  d_lu_star: "Best available player", d_lu_min: "Rotation minutes available",
+  d_lu_star: "Best available player", d_lu_min: "Rotation minutes available", d_lu_rapm: "Lineup RAPM (play-by-play)", d_lu_tpi: "Lineup Tipoff Impact",
 };
 
 function coefChart() {
@@ -125,16 +125,20 @@ function viewMethod() {
   $$\text{margin}_h = \sigma\,\Phi^{-1}\!\big(p^{\text{model}}_h\big), \qquad \text{spread}_h = -\,\text{margin}_h$$
 
   <h2 id="beat">8 · Can it beat the market?</h2>
-  <p>Short answer: not on its own, and nothing tried so far changes that. Every candidate below went through the same walk-forward backtest and was scored on the 14,944 games from 2012-13 onward that have a market line. The last column is the model's log loss minus the market's, with a paired standard error (positive means the market is better).</p>
+  <p>Short answer: not on its own. Lineup data (RAPM) closed about a sixth of the gap, and a blend with the market ties it. Every candidate went through the same walk-forward backtest and was scored on the 17,577 games from 2012-13 onward that have a market line. The last column is the model's log loss minus the market's, with a paired standard error (positive means the market is better).</p>
   <div class="card table-wrap"><table><thead><tr><th>Variant</th><th class="r">Accuracy</th><th class="r">Market</th><th class="r">Δ log loss vs market</th></tr></thead><tbody>
-    <tr><td>Default model</td><td class="r mono">67.3%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0011</td></tr>
-    <tr><td>+ Tipoff Impact (custom player metric)</td><td class="r mono">67.6%</td><td class="r mono">68.0%</td><td class="r mono">+0.0067 ± 0.0012</td></tr>
-    <tr><td>+ travel, time zones, 3-in-4 nights, altitude</td><td class="r mono">67.5%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0012</td></tr>
-    <tr><td>+ Massey (opponent-adjusted) ratings</td><td class="r mono">67.2%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0011</td></tr>
-    <tr><td>All of the above</td><td class="r mono">67.3%</td><td class="r mono">68.0%</td><td class="r mono">+0.0068 ± 0.0012</td></tr>
-    <tr><td>Market line + all model features (13,713 games)</td><td class="r mono">67.9%</td><td class="r mono">68.0%</td><td class="r mono">+0.0010 ± 0.0006</td></tr>
-    <tr><td><b>Tipoff × Market stack</b> (13,713 games)</td><td class="r mono"><b>${D.backtest.blend ? pct(D.backtest.blend.vs_market.model.accuracy, 1) : "—"}</b></td><td class="r mono">${D.backtest.blend ? pct(D.backtest.blend.vs_market.market.accuracy, 1) : "—"}</td><td class="r mono">+0.0002 ± 0.0002</td></tr>
+    <tr><td>Box-score model (before lineup data)</td><td class="r mono">67.5%</td><td class="r mono">68.2%</td><td class="r mono">+0.0073 ± 0.0010</td></tr>
+    <tr><td>+ Tipoff Impact (custom player metric)</td><td class="r mono">67.7%</td><td class="r mono">68.2%</td><td class="r mono">+0.0069 ± 0.0011</td></tr>
+    <tr><td>+ travel, time zones, 3-in-4 nights, altitude</td><td class="r mono">67.7%</td><td class="r mono">68.2%</td><td class="r mono">+0.0074 ± 0.0011</td></tr>
+    <tr><td>+ Massey (opponent-adjusted) ratings</td><td class="r mono">67.4%</td><td class="r mono">68.2%</td><td class="r mono">+0.0071 ± 0.0010</td></tr>
+    <tr><td><b>+ RAPM from play-by-play lineups</b> (now the default)</td><td class="r mono"><b>67.8%</b></td><td class="r mono">68.2%</td><td class="r mono"><b>+0.0058 ± 0.0011</b></td></tr>
+    <tr><td>Market line + all model features (16,346 games)</td><td class="r mono">68.1%</td><td class="r mono">68.2%</td><td class="r mono">+0.0008 ± 0.0005</td></tr>
+    <tr><td><b>Tipoff × Market stack</b> (16,346 games)</td><td class="r mono"><b>${D.backtest.blend ? pct(D.backtest.blend.vs_market.model.accuracy, 1) : "—"}</b></td><td class="r mono">${D.backtest.blend ? pct(D.backtest.blend.vs_market.market.accuracy, 1) : "—"}</td><td class="r mono">+0.0000 ± 0.0002</td></tr>
   </tbody></table></div>
+  <h3>RAPM from play-by-play</h3>
+  <p>ESPN's play-by-play logs every substitution, so the five players on the floor for each team are rebuilt for every stretch of every game since 2010-11 (about 620,000 <i>stints</i>; reconstructed minutes match the box score to within a minute). Each stint \(s\) gives one observation: \(x_{s,j} = +1\) for the home five, \(-1\) for the away five, response \(y_s\) = home margin per 100 possessions, weight \(w_s\) = possessions × recency decay (half-life two years, three-season window):</p>
+  $$\hat\beta = \arg\min_\beta \sum_s w_s\big(y_s - h - x_s^\top \beta\big)^2 + \lambda\lVert\beta\rVert^2, \qquad \lambda = 1000$$
+  <p>\(h\) is home-court advantage. Ratings are refit on the first of every month from stints before that date, so every game in the backtest is priced with ratings that never saw it. Players without lineup data count at −2 (replacement level). The lineup feature is the expected-minutes-weighted RAPM of the available rotation, aggregated exactly like the box metrics. \(\lambda\) and the half-life were chosen on a small grid with <code>tools/tune_rapm.py</code>; all settings were within 0.0007 log loss of each other. RAPM now has the largest standardized coefficient of any player input.</p>
   <h3>Tipoff Impact (TPI)</h3>
   <p>A custom, BPM-style player metric. Each player-game's box score is converted to rates per 100 on-court possessions \(z_k\), and the estimated on-court net rating is regressed on them by minutes-weighted ridge regression:</p>
   $$\text{TPI} = \alpha + \sum_k \gamma_k z_k$$
@@ -145,8 +149,8 @@ function viewMethod() {
   <h3>The stack</h3>
   <p>The only construction that matched the market is a two-input logistic stack, fit walk-forward on earlier seasons' games that had a line:</p>
   $$\operatorname{logit} p = a + b\,\operatorname{logit} p^{\text{mkt}} + c\,\operatorname{logit} p^{\text{model}}$$
-  <p>Fit on all games with a line, the weights are \(b = ${D.backtest.blend ? D.backtest.blend.coef.market : "—"}\) and \(c = ${D.backtest.blend ? D.backtest.blend.coef.model : "—"}\). The market carries most of the information, and the model adds a small, mostly redundant correction. It's shown on every game as "Tipoff × Market".</p>
-  <p><b>Why the market is hard to beat.</b> The closing line aggregates injury news up to tipoff, lineup and rest decisions, tracking-based player value and the money of bettors who have their own models. This model's information is a subset of that: public box scores and the injury report. Raw accuracy also has little statistical power here. On 15,000 games, the standard error of an accuracy figure is about 0.4 points, so a gap under about 1 point between two models is mostly noise. Log loss is the sharper test, and it consistently favors the market. Better information would move the needle more than more modeling: earlier and more precise availability, minutes restrictions, or play-by-play on/off data for a true RAPM. Without that, a public box-score model doesn't get past the closing line.</p>
+  <p>Fit on all games with a line, the weights are \(b = ${D.backtest.blend ? D.backtest.blend.coef.market : "—"}\) and \(c = ${D.backtest.blend ? D.backtest.blend.coef.model : "—"}\). The market carries most of the information. The model's weight rose from about 0.12 to 0.21 once lineup data was added, so RAPM carries information the market doesn't fully price, but not enough to beat it on its own. It's shown on every game as "Tipoff × Market".</p>
+  <p><b>Why the market is hard to beat.</b> The closing line aggregates injury news up to tipoff, lineup and rest decisions, tracking-based player value and the money of bettors who have their own models. This model's information is a subset of that: public box scores and the injury report. Raw accuracy also has little statistical power here. On 15,000 games, the standard error of an accuracy figure is about 0.4 points, so a gap under about 1 point between two models is mostly noise. Log loss is the sharper test, and it consistently favors the market. Lineup data was the one addition that moved the needle. What's left is mostly information the market sees and this model doesn't: late availability, minutes restrictions and tracking data.</p>
 
   <h2 id="metrics">9 · Why these player metrics</h2>
   <p>The player layer needs a rating that (a) updates daily from data free in the cloud, (b) works at the single-game level so it can be decayed and credibility-weighted, (c) is a rate, not a volume measure, since minutes are handled separately, and (d) captures both box-score production and non-box impact. Here's how the common alternatives fare:</p>
@@ -154,7 +158,7 @@ function viewMethod() {
     <tr><td><b>Win Shares</b></td><td>Credits team wins to players via marginal offense and defense</td><td>A cumulative volume measure. Per-48 helps, but the defensive half is mostly team defense split by minutes and rebounds, so it double-counts what Elo and team form already carry. Needs Basketball-Reference's season-level pipeline.</td></tr>
     <tr><td><b>VORP</b></td><td>BPM above replacement (−2.0) × share of team minutes</td><td>Volume by construction. Minutes are already modeled separately as expected minutes and availability, so VORP would count playing time twice. The rate inside it, BPM, is the interesting part (see below).</td></tr>
     <tr><td><b>BPM</b></td><td>Box-score regression onto RAPM, with team adjustment</td><td>The strongest free box metric, and computable from box scores with published coefficients plus position and role estimates. It's the natural next upgrade, and it would replace Game Score.</td></tr>
-    <tr><td><b>LEBRON / EPM / RAPTOR</b></td><td>Ridge-regressed plus-minus with box and tracking priors</td><td>Proprietary or discontinued, not available daily for free, and they use tracking and play-by-play data this pipeline doesn't have.</td></tr>
+    <tr><td><b>LEBRON / EPM / RAPTOR</b></td><td>Ridge-regressed plus-minus with box and tracking priors</td><td>Proprietary or discontinued. Their core, RAPM from lineup stints, is now built here from ESPN play-by-play (section 8), without the tracking-data priors.</td></tr>
     <tr><td><b>Elo</b></td><td>A team rating from results</td><td>Already in the model at team level. There's no standard player Elo, because players don't win or lose head-to-head.</td></tr>
     <tr><td><b>Pace</b></td><td>Possessions per 48 minutes</td><td>Measures tempo, not quality. It's already used to normalize every rating to per-100 possessions. Pace changes the variance of the margin more than who wins.</td></tr>
   </tbody></table></div>

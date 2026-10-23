@@ -84,7 +84,7 @@ def factor_steps(models, X):
 def rotation(roster, team_id, n=11):
     t = roster[roster.team_id == team_id].sort_values("exp_min", ascending=False).head(n)
     return [{"name": p.PLAYER_NAME, "status": p.status, "manual": bool(p.manual), "min": r(p.exp_min, 1),
-             "gmsc": r(p.r_gmsc, 1), "pie": r(p.r_pie), "net": r(p.r_net, 1)} for p in t.itertuples()]
+             "gmsc": r(p.r_gmsc, 1), "pie": r(p.r_pie), "net": r(p.r_net, 1), "rapm": r(p.r_rapm, 2)} for p in t.itertuples()]
 
 
 def game_json(row, roster, steps):
@@ -96,7 +96,7 @@ def game_json(row, roster, steps):
             "color": TEAM_COLORS.get(abbr, "#555"), "elo": r(row[f"elo{sfx}"], 0),
             "rest": int(row[f"rest{sfx}"]), "form_net": r(row[f"f_net{sfx}"], 1),
             "form_ortg": r(row[f"f_ortg{sfx}"], 1), "form_drtg": r(row[f"f_drtg{sfx}"], 1),
-            "lineup": {k: r(row[f"lu_{k}{sfx}"]) for k in ("pie", "net", "gmsc", "star", "min")},
+            "lineup": {k: r(row[f"lu_{k}{sfx}"]) for k in ("pie", "net", "gmsc", "star", "min", "rapm")},
             "rotation": rotation(roster, row[f"{s}_id"], 13),
         }
     p = float(row.home_win_prob)
@@ -112,7 +112,7 @@ def power_rankings(g, start, models, records):
     """Each team's chance to beat a league-average team on a neutral floor, using its
     current Elo, form and healthy roster (taken from its next scheduled game)."""
     upcoming = g[(g.date >= start) & g.home_pts.isna()].sort_values("date")
-    cols = ["elo", "gp"] + [f"f_{s}" for s in nba.STATS] + [f"lu_{k}" for k in ("pie", "net", "gmsc", "star", "min")]
+    cols = ["elo", "gp"] + [f"f_{s}" for s in nba.STATS] + [f"lu_{k}" for k in ("pie", "net", "gmsc", "star", "min", "rapm")]
     sides = []
     for s, sfx in (("home", "_h"), ("away", "_a")):
         t = upcoming[[f"{s}_id", s, "date"] + [c + sfx for c in cols]].copy()
@@ -160,7 +160,7 @@ def player_table(roster, pg, min_minutes=10):
     p = roster[roster.exp_min >= min_minutes].copy()
     abbr = {int(k): v for k, v in nba.load_team_games().drop_duplicates("TEAM_ID").set_index("TEAM_ID").TEAM_ABBREVIATION.items()}
     return [{"name": x.PLAYER_NAME, "team": abbr.get(int(x.team_id), ""), "status": x.status,
-             "min": r(x.exp_min, 1), "gmsc": r(x.r_gmsc, 1), "pie": r(x.r_pie), "net": r(x.r_net, 1),
+             "min": r(x.exp_min, 1), "gmsc": r(x.r_gmsc, 1), "pie": r(x.r_pie), "net": r(x.r_net, 1), "rapm": r(x.r_rapm, 2),
              "spark": spark.get(x.PLAYER_ID, [])}
             for x in p.sort_values("r_gmsc", ascending=False).itertuples()]
 
@@ -218,7 +218,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 5        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 6        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():
@@ -307,6 +307,7 @@ LAB_GROUPS = [   # key, label, features, on by default, description
     ("onnet", "Players: on-court net rating", ["d_lu_net"], True, "Available rotation's plus-minus per 100 possessions on the floor."),
     ("gmsc", "Players: Game Score/36", ["d_lu_gmsc"], True, "Available rotation's box-score production per 36 minutes."),
     ("star", "Players: best available", ["d_lu_star"], True, "Highest-rated available player expected to play 20+ minutes."),
+    ("rapm", "Players: RAPM (lineup data)", ["d_lu_rapm"], True, "Adjusted plus-minus from play-by-play lineups: each player's impact holding the other nine fixed (ridge, monthly walk-forward fits)."),
     ("depth", "Players: rotation minutes", ["d_lu_min"], True, "Expected minutes of the top 10 available players (missing-player load)."),
     ("pace", "Pace (tempo)", ["d_pace"], False, "Difference in recent possessions per game. Off by default: tempo says little about who wins."),
     ("tpi", "Players: Tipoff Impact (custom)", ["d_lu_tpi"], False, "Our own BPM-style metric: box-score rates per 100 possessions regressed onto on-court plus-minus, fit on 2010-12 only."),
@@ -318,7 +319,7 @@ LAB_UNAVAILABLE = [
     ("VORP", "Volume stat (BPM x minutes share). Minutes are already modeled through expected minutes and availability."),
     ("Win Shares", "Cumulative, and its defensive half is mostly team defense, which Elo and form already carry."),
 ]
-LAB_VERSION = 2
+LAB_VERSION = 3
 
 
 def lab_columns(rows, X, market):
@@ -451,7 +452,7 @@ def main(date=None, refresh=True):
             "prev_rank": None if ranks_prev is None or t.abbr not in ranks_prev else int(ranks_prev[t.abbr]),
             "power": r(t.power), "elo": r(t.elo, 0), "w": int(t.w) if not math.isnan(t.w) else 0,
             "l": int(t.l) if not math.isnan(t.l) else 0, "form_net": r(t.f_net, 1),
-            "lineup_gmsc": r(t.lu_gmsc, 2), "star": r(t.lu_star, 1),
+            "lineup_gmsc": r(t.lu_gmsc, 2), "lineup_rapm": r(t.lu_rapm, 2), "star": r(t.lu_star, 1),
             "missing": [{"name": h.PLAYER_NAME, "status": h.status, "min": r(h.exp_min, 1)} for h in hurt.itertuples()],
             "rotation": rotation(roster, tid, 10), "elo_history": elo_hist.get(t.abbr, []),
             "rank_history": history.get(t.abbr, []),

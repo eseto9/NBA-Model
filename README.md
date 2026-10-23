@@ -16,6 +16,11 @@ Features are built only from information available before each game:
   minutes, depend on draft position (picks 1-3, 4-10, 11-20, 21-30, 31-45, 46-60, undrafted), learned from how past
   rookies in each range played.
   Lineup strength is the expected-minutes-weighted rating of the top 10 available players.
+- **RAPM from play-by-play** ([stints.py](stints.py), [rapm.py](rapm.py)): ESPN's play-by-play is replayed to rebuild
+  the ten players on the floor for every stretch of every game since 2010-11 (`data/nba/stints`, about 620,000 stints;
+  rebuilt minutes match box scores within a minute). A ridge regression of each stint's margin per 100 possessions on
+  who was on the floor gives every player's adjusted plus-minus (lambda 1000, two-year half-life). It's refit on the
+  first of each month from earlier games only. Past seasons' fits are cached in `data/nba/rapm_monthly.csv.gz`.
   - Past games use the players who actually played.
   - Upcoming games use today's roster minus the ESPN injury report. Players listed out are dropped, and day-to-day players count for half their minutes.
 
@@ -55,7 +60,8 @@ change in `data/overrides.csv`, re-prices the slate and redeploys.
 - **Massey ratings**
 - **Market stacking**
 
-None beat the closing line on log loss. A two-input stack (`logit p = a + b·logit(market) + c·logit(model)`)
+RAPM from lineup data is the only one that helped clearly (log loss gap to the market 0.0073 → 0.0058), so it's in
+the default model. None beat the closing line on log loss. A two-input stack (`logit p = a + b·logit(market) + c·logit(model)`)
 ties it, and the site shows it as "Tipoff × Market". The new inputs are optional in the Model Lab, and the full
 write-up is on the site's Methodology page.
 

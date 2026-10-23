@@ -251,6 +251,7 @@ const METRICS = [
   { k: "form_drtg", label: "Def rtg", lo: 125, hi: 100, f: (v) => v.toFixed(1) },
   { k: "lu_gmsc", label: "Lineup", lo: 8, hi: 17, f: (v) => v.toFixed(1), get: (s) => s.lineup.gmsc },
   { k: "lu_star", label: "Best player", lo: 10, hi: 26, f: (v) => v.toFixed(1), get: (s) => s.lineup.star },
+  { k: "lu_rapm", label: "Lineup RAPM", lo: -4, hi: 4, f: (v) => (v > 0 ? "+" : "") + v.toFixed(1), get: (s) => s.lineup.rapm },
   { k: "rest", label: "Rest days", lo: 0, hi: 4, f: (v) => (v >= 5 ? "5+" : String(v)) },
 ];
 
@@ -273,7 +274,7 @@ function rotationCol(side) {
     ${side.rotation.map((p) => {
       const mine = state.scratch[`${side.abbr}|${p.name}`];
       const status = mine === "out" ? "Out" : mine === "in" ? "Healthy" : p.status;
-      return `<div class="pl ${esc(status)} ${mine ? "mine" : ""}" data-scratch="${esc(side.abbr)}|${esc(p.name)}" data-status="${esc(p.status)}" data-tip="<b>${esc(p.name)}</b><br>${esc(p.status)}${p.manual ? " (late scratch)" : ""}${mine ? `, you marked ${mine === "out" ? "out" : "playing"}` : ""} · ${p.min} exp. min<br>Game Score/36 ${p.gmsc} · PIE ${pct(p.pie, 1)} · on-court net ${p.net > 0 ? "+" : ""}${p.net}<br><i>tap to change</i>">
+      return `<div class="pl ${esc(status)} ${mine ? "mine" : ""}" data-scratch="${esc(side.abbr)}|${esc(p.name)}" data-status="${esc(p.status)}" data-tip="<b>${esc(p.name)}</b><br>${esc(p.status)}${p.manual ? " (late scratch)" : ""}${mine ? `, you marked ${mine === "out" ? "out" : "playing"}` : ""} · ${p.min} exp. min<br>Game Score/36 ${p.gmsc} · PIE ${pct(p.pie, 1)} · on-court net ${p.net > 0 ? "+" : ""}${p.net}<br>RAPM ${p.rapm > 0 ? "+" : ""}${p.rapm} per 100 poss.<br><i>tap to change</i>">
       <span class="pl-name">${esc(p.name)}${p.manual ? ` <span class="tag scratch">scratch</span>` : ""}${mine ? ` <span class="tag mine-tag">${mine === "out" ? "you: out" : "you: in"}</span>` : ""}</span>
       <div class="pl-bar"><i style="background:${ratingColor(p.gmsc)}" data-w="${pct(clamp(p.min / 38, 0.05, 1))}"></i></div></div>`;
     }).join("")}</div>`;
@@ -630,14 +631,15 @@ function playerRows() {
     <td><div class="bar-cell"><div class="track"><i data-w="${pct(clamp(p.gmsc / maxG, 0, 1), 1)}"></i></div><span class="mono">${p.gmsc}</span></div></td>
     <td class="r mono">${pct(p.pie, 1)}</td>
     <td class="r mono" style="color:${p.net >= 0 ? "var(--good)" : "var(--bad)"}">${p.net > 0 ? "+" : ""}${p.net}</td>
+    <td class="r mono" style="color:${(p.rapm ?? 0) >= 0 ? "var(--good)" : "var(--bad)"}">${p.rapm == null ? "—" : (p.rapm > 0 ? "+" : "") + p.rapm.toFixed(1)}</td>
     <td>${spark(p.spark)}</td></tr>`).join("")}
-    ${ps.length > shown.length ? `<tr><td colspan="8" style="text-align:center"><button class="chip" id="more">Show more (${ps.length - shown.length})</button></td></tr>` : ""}
-    ${!ps.length ? `<tr><td colspan="8" class="empty">No players match.</td></tr>` : ""}`;
+    ${ps.length > shown.length ? `<tr><td colspan="9" style="text-align:center"><button class="chip" id="more">Show more (${ps.length - shown.length})</button></td></tr>` : ""}
+    ${!ps.length ? `<tr><td colspan="9" class="empty">No players match.</td></tr>` : ""}`;
 }
 
 function viewPlayers() {
   const teams = [...new Set(D.players.map((p) => p.team))].filter(Boolean).sort();
-  const cols = [["min", "Exp. min"], ["gmsc", "Game Score/36"], ["pie", "PIE"], ["net", "On-court net"]];
+  const cols = [["min", "Exp. min"], ["gmsc", "Game Score/36"], ["pie", "PIE"], ["net", "On-court net"], ["rapm", "RAPM"]];
   return `<section class="section-head" style="margin-bottom:20px">
     <div><h2>Player ratings</h2><p>What the model thinks of every rotation player, with recent games weighted most. These ratings drive the lineup strength in each game.</p></div>
     <div class="search"><input id="pq" type="search" placeholder="Search a player" value="${esc(state.pQuery)}" aria-label="Search players">

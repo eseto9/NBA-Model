@@ -266,14 +266,21 @@ def build(extra_games=None, extra_lineups=None, rated=None):
     games = add_elo(games)
     games = add_form(games, team_box(tg))
     pg = (rated or load_players())[0]
-    lineups = players.history_lineups(pg)
+    lineups = players.history_lineups(pg).merge(rapm_history(pg), on=["game_id", "team_id"], how="left")
     if extra_lineups is not None:
         lineups = pd.concat([lineups, extra_lineups[~extra_lineups.game_id.isin(lineups.game_id)]])
     games = add_lineups(games, lineups)
     return situational.add_massey(situational.add_schedule(games))
 
 
-LINEUP_FEATURES = ["d_lu_pie", "d_lu_net", "d_lu_gmsc", "d_lu_star", "d_lu_min"]
+LINEUP_FEATURES = ["d_lu_pie", "d_lu_net", "d_lu_gmsc", "d_lu_star", "d_lu_min", "d_lu_rapm"]
+
+
+def rapm_history(pg):
+    """Lineup RAPM for past games (monthly walk-forward fits; past seasons cached)."""
+    import rapm
+    lu, _ = rapm.history(pg, rapm.stints_ready(), keep_before=pd.Timestamp(current_season(), 8, 1))
+    return lu
 
 
 def lab_features(g):
@@ -384,6 +391,14 @@ def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     injuries = players.fetch_injuries()
     roster, unmatched = players.availability(roster, injuries, force_out, force_in)
     lineups, roster = players.upcoming_lineups(unplayed, roster, latest, priors)
+    # RAPM for upcoming games: ratings from every stint so far, same availability weights
+    import rapm
+    now = rapm.latest(rapm.stints_ready())
+    roster["r_rapm"] = roster.PLAYER_ID.map(now).fillna(rapm.REPLACEMENT)
+    sides = pd.concat([unplayed[["game_id", f"{s}_id"]].rename(columns={f"{s}_id": "team_id"}) for s in ("home", "away")])
+    rows = sides.merge(roster, on="team_id").assign(date=pd.Timestamp.now().normalize())
+    month = pd.Timestamp.now().to_period("M").to_timestamp()
+    lineups = lineups.merge(rapm.lineup_rapm(rows, {month: now}), on=["game_id", "team_id"], how="left")
 
     g = build(sched, lineups, rated)
     window = g[(g.date >= start) & (g.date < end)].copy()
