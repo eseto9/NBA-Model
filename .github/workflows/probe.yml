@@ -1,0 +1,31 @@
+name: probe
+on: [push, workflow_dispatch]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q nba_api requests
+      - name: stats.nba.com
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import time
+          from nba_api.stats.endpoints import leaguegamefinder, playergamelogs, scheduleleaguev2, commonteamroster
+          for name, f in [("gamefinder", lambda: leaguegamefinder.LeagueGameFinder(season_nullable="2026-27", league_id_nullable="00", season_type_nullable="Regular Season", timeout=30)),
+                          ("playerlogs", lambda: playergamelogs.PlayerGameLogs(season_nullable="2026-27", season_type_nullable="Regular Season", measure_type_player_game_logs_nullable="Advanced", timeout=30)),
+                          ("schedule", lambda: scheduleleaguev2.ScheduleLeagueV2(season="2026-27", timeout=30)),
+                          ("roster", lambda: commonteamroster.CommonTeamRoster(team_id=1610612752, season="2026-27", timeout=30))]:
+              t = time.time()
+              try:
+                  print(name, "OK", f().get_data_frames()[0].shape, round(time.time()-t, 1))
+              except Exception as e:
+                  print(name, "FAIL", type(e).__name__, round(time.time()-t, 1))
+          PY
+      - name: other sources
+        run: |
+          curl -s -o /dev/null -w "espn %{http_code}\n" https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries
+          curl -s -o /dev/null -w "cdn schedule %{http_code}\n" https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json
+          curl -s -o /dev/null -w "cdn scoreboard %{http_code}\n" https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json
