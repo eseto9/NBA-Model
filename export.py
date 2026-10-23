@@ -19,12 +19,14 @@ import numpy as np
 import pandas as pd
 
 import nba
+import odds
 import players
 
 ET = ZoneInfo("America/New_York")
 SITE = nba.ROOT / "site" / "data"
 LOG = nba.ROOT / "log" / "predictions.csv"
 RANK_LOG = nba.ROOT / "log" / "rankings.csv"
+OVERRIDES = nba.ROOT / "data" / "overrides.csv"
 
 TEAM_COLORS = {
     "ATL": "#C8102E", "BOS": "#007A33", "BKN": "#000000", "CHA": "#1D1160", "CHI": "#CE1141",
@@ -81,8 +83,8 @@ def factor_steps(models, X):
 
 def rotation(roster, team_id, n=11):
     t = roster[roster.team_id == team_id].sort_values("exp_min", ascending=False).head(n)
-    return [{"name": p.PLAYER_NAME, "status": p.status, "min": r(p.exp_min, 1), "gmsc": r(p.r_gmsc, 1),
-             "pie": r(p.r_pie), "net": r(p.r_net, 1)} for p in t.itertuples()]
+    return [{"name": p.PLAYER_NAME, "status": p.status, "manual": bool(p.manual), "min": r(p.exp_min, 1),
+             "gmsc": r(p.r_gmsc, 1), "pie": r(p.r_pie), "net": r(p.r_net, 1)} for p in t.itertuples()]
 
 
 def game_json(row, roster, steps):
@@ -134,13 +136,14 @@ def power_rankings(g, start, models, records):
 
 
 def elo_history(g, season):
-    """Post-game Elo for every team, this season and last."""
+    """Post-game Elo for every team, this season and last: [date, elo, 1 if postseason]."""
     played = g[g.home_pts.notna() & (g.season >= season - 1)]
+    played = played.assign(post=~played.game_id.str.startswith("002"))     # playoffs, play-in
     rows = pd.concat([
-        played[["date", "season", "home", "elo_h_post"]].set_axis(["date", "season", "abbr", "elo"], axis=1),
-        played[["date", "season", "away", "elo_a_post"]].set_axis(["date", "season", "abbr", "elo"], axis=1),
+        played[["date", "season", "home", "elo_h_post", "post"]].set_axis(["date", "season", "abbr", "elo", "post"], axis=1),
+        played[["date", "season", "away", "elo_a_post", "post"]].set_axis(["date", "season", "abbr", "elo", "post"], axis=1),
     ]).sort_values("date")
-    return {a: [[f"{d:%Y-%m-%d}", int(round(e))] for d, e in zip(t.date, t.elo)] for a, t in rows.groupby("abbr")}
+    return {a: [[f"{d:%Y-%m-%d}", int(round(e)), int(q)] for d, e, q in zip(t.date, t.elo, t.post)] for a, t in rows.groupby("abbr")}
 
 
 def season_records(g, season):
@@ -164,16 +167,29 @@ def player_table(roster, pg, min_minutes=10):
 
 # ---------------------------------------------------------------- record
 
+def scratches(start):
+    """Manual availability overrides (data/overrides.csv) for today and tomorrow: (out, in) name lists."""
+    if not OVERRIDES.exists():
+        return [], []
+    o = pd.read_csv(OVERRIDES)
+    o = o[(o.date >= f"{start:%Y-%m-%d}") & (o.date <= f"{start + pd.Timedelta(days=1):%Y-%m-%d}")]
+    o = o.drop_duplicates("player", keep="last")         # the latest call on a player wins
+    return o[o.status == "out"].player.tolist(), o[o.status == "in"].player.tolist()
+
+
 def update_log(slate, now):
+    """Record each slate pick. A pick can be revised (new injury news, a late scratch) until its
+    game tips off; after that it is frozen and graded."""
     LOG.parent.mkdir(exist_ok=True)
     log = pd.read_csv(LOG, dtype={"game_id": str}) if LOG.exists() else pd.DataFrame(
         columns=["game_id", "date", "away", "home", "p_home", "logged_at"])
     key = lambda d: d.date.astype(str).str[:10] + d.home + d.away
-    new = slate[~key(slate).isin(key(log))]
-    if len(new):
-        add = pd.DataFrame({"game_id": new.game_id, "date": new.date.dt.strftime("%Y-%m-%d"), "away": new.away,
-                            "home": new.home, "p_home": new.home_win_prob.round(4), "logged_at": now})
-        log = pd.concat([log, add], ignore_index=True)
+    not_started = slate.tip.isna() | (pd.to_datetime(slate.tip) > pd.Timestamp(now.replace(tzinfo=None)))
+    revisable = slate[not_started | ~key(slate).isin(key(log))]
+    if len(revisable):
+        add = pd.DataFrame({"game_id": revisable.game_id, "date": revisable.date.dt.strftime("%Y-%m-%d"), "away": revisable.away,
+                            "home": revisable.home, "p_home": revisable.home_win_prob.round(4), "logged_at": now.isoformat(timespec="minutes")})
+        log = pd.concat([log[~key(log).isin(key(add))], add], ignore_index=True)
         log.to_csv(LOG, index=False)
     return log
 
@@ -202,16 +218,120 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-def backtest_season(g, season):
-    """Walk-forward predictions for a finished season (model trained only on earlier seasons)."""
+BACKTEST_VERSION = 3        # bump when the model changes, to recompute the backtest
+
+
+def historical_market():
+    """Closing-ish moneylines for past games (ESPN pickcenter), averaged across providers, margin removed."""
+    files = [nba.HIST / "odds_hist.csv.gz", *sorted(nba.LIVE.glob("*/*.odds.csv"))]
+    frames = [pd.read_csv(f) for f in files if f.exists() and f.stat().st_size > 60]
+    if not frames:
+        return pd.DataFrame(columns=["date", "home", "away", "p_market"])
+    o = pd.concat(frames, ignore_index=True)
+    o = o[(o.home_ml.abs() >= 100) & (o.away_ml.abs() >= 100)]
+    o["p_market"] = [odds.no_vig(h, a) for h, a in zip(o.home_ml, o.away_ml)]
+    return o.groupby(["date", "home", "away"], as_index=False).p_market.mean()
+
+
+def versus_market(df):
+    """Model vs market on games that have a line: df has p (model), p_market, y."""
+    m = df.dropna(subset=["p_market"])
+    if not len(m):
+        return {"n": 0}
+    s_model, s_market = summary(m.p, m.y), summary(m.p_market, m.y)
+    agree = (m.p >= 0.5) == (m.p_market >= 0.5)
+    dis = m[~agree]
+    return {"n": int(len(m)), "model": {k: s_model[k] for k in ("accuracy", "log_loss", "correct")},
+            "market": {k: s_market[k] for k in ("accuracy", "log_loss", "correct", "calibration")},
+            "agree": r(agree.mean()), "disagree_n": int(len(dis)),
+            "disagree_model_right": int(((dis.p >= 0.5) == (dis.y == 1)).sum())}
+
+
+def backtest_all(g):
+    """Walk-forward backtest of every season: each season is predicted by a model trained
+    only on the seasons before it. Returns per-season and overall results, with the market."""
     played = nba.training_rows(g)
-    train, test = played[played.season < season], played[played.season == season]
-    models = nba.fit_final(train)
-    p = nba.predict_proba(models, test)
-    y = (test.home_pts > test.away_pts).astype(int).values
-    days = pd.DataFrame({"date": test.date.dt.strftime("%Y-%m-%d"), "hit": (p >= 0.5) == (y == 1)})
-    daily = days.groupby("date").hit.agg(["sum", "count"]).reset_index().values.tolist()
-    return {"season": nba.season_str(season), **summary(p, y), "daily": [[d, int(s), int(c)] for d, s, c in daily]}
+    seasons = [s for s in sorted(played.season.unique()) if s < nba.current_season()][1:]   # need a season to train on
+    games = []
+    for s in seasons:
+        train, test = played[played.season < s], played[played.season == s]
+        p = nba.predict_proba(nba.fit_final(train), test)
+        games.append(pd.DataFrame({"season": s, "date": test.date.dt.strftime("%Y-%m-%d"), "home": test.home.values,
+                                   "away": test.away.values, "p": p, "y": (test.home_pts > test.away_pts).astype(int).values}))
+        print(f"  backtest {nba.season_str(s)}")
+    df = pd.concat(games).merge(historical_market(), on=["date", "home", "away"], how="left")
+    per_season = []
+    for s, d in df.groupby("season"):
+        season_sum = summary(d.p, d.y)
+        vs = versus_market(d)
+        vs.get("market", {}).pop("calibration", None)
+        season_sum.pop("calibration")
+        per_season.append({"season": nba.season_str(s), **season_sum, "vs_market": vs})
+    days = df.assign(hit=(df.p >= 0.5) == (df.y == 1)).groupby("date").hit.agg(["sum", "count"]).reset_index()
+    return {"version": BACKTEST_VERSION, "through": nba.season_str(seasons[-1]), "first": nba.season_str(seasons[0]),
+            "overall": summary(df.p, df.y), "vs_market": versus_market(df), "seasons": per_season,
+            "daily": [[d, int(s), int(c)] for d, s, c in days.values.tolist()]}
+
+
+# ---------------------------------------------------------------- model lab
+
+LAB_GROUPS = [   # key, label, features, on by default, description
+    ("elo", "Elo rating", ["elo_diff"], True, "Margin-adjusted team Elo difference, including home court."),
+    ("efficiency", "Efficiency form", ["d_net", "d_ortg", "d_drtg", "d_win"], True, "Recent offensive, defensive and net rating per 100 possessions, and win rate (10-game half-life)."),
+    ("four_factors", "Four factors", ["d_efg", "d_opp_efg", "d_tov", "d_orb", "d_ftr"], True, "Shooting (and shooting allowed), turnovers, offensive rebounding, free throws."),
+    ("rest", "Rest & schedule", ["rest_h", "rest_a", "b2b_h", "b2b_a", "gp_min"], True, "Days of rest, back-to-backs, games played this season."),
+    ("context", "Game context", ["playoffs", "neutral"], True, "Playoff and neutral-site flags."),
+    ("pie", "Players: PIE", ["d_lu_pie"], True, "Available rotation's minutes-weighted share of box-score events."),
+    ("onnet", "Players: on-court net rating", ["d_lu_net"], True, "Available rotation's plus-minus per 100 possessions on the floor."),
+    ("gmsc", "Players: Game Score/36", ["d_lu_gmsc"], True, "Available rotation's box-score production per 36 minutes."),
+    ("star", "Players: best available", ["d_lu_star"], True, "Highest-rated available player expected to play 20+ minutes."),
+    ("depth", "Players: rotation minutes", ["d_lu_min"], True, "Expected minutes of the top 10 available players (missing-player load)."),
+    ("pace", "Pace (tempo)", ["d_pace"], False, "Difference in recent possessions per game. Off by default: tempo says little about who wins."),
+]
+LAB_UNAVAILABLE = [
+    ("LEBRON", "BBall Index's tracking-based plus-minus. Proprietary and paywalled, no free daily feed."),
+    ("VORP", "Volume stat (BPM x minutes share). Minutes are already modeled through expected minutes and availability."),
+    ("Win Shares", "Cumulative, and its defensive half is mostly team defense, which Elo and form already carry."),
+    ("BPM", "Box Plus/Minus is computable from box scores and is the planned next player metric."),
+]
+LAB_VERSION = 1
+
+
+def lab_columns(rows, X, market):
+    """Columnar arrays for the Lab: features rounded to 4 significant figures."""
+    m = rows[["date", "home", "away"]].assign(date=rows.date.dt.strftime("%Y-%m-%d")).merge(market, on=["date", "home", "away"], how="left")
+    sig = lambda v: float(f"{v:.4g}")
+    return {"season": rows.season.astype(int).tolist(), "date": rows.date.dt.strftime("%Y-%m-%d").tolist(),
+            "home": rows.home.tolist(), "away": rows.away.tolist(),
+            "y": (rows.home_pts > rows.away_pts).astype(int).tolist() if rows.home_pts.notna().all() else None,
+            "elo_prob": [sig(v) for v in rows.elo_prob],
+            "p_market": [None if pd.isna(v) else round(float(v), 4) for v in m.p_market],
+            "X": {c: [sig(v) for v in X[c]] for c in X.columns}}
+
+
+def write_lab(hist, slate, season):
+    """lab_hist.json: completed seasons (rewritten only when a season ends or the Lab changes);
+    lab_live.json: this season so far plus today's slate (small, daily)."""
+    rows = nba.training_rows(hist)
+    market = historical_market()
+    meta = {"version": LAB_VERSION, "season": season,
+            "groups": [{"key": k, "label": l, "features": f, "default": d, "desc": t} for k, l, f, d, t in LAB_GROUPS],
+            "unavailable": [{"label": l, "why": w} for l, w in LAB_UNAVAILABLE],
+            "default": {"model": "logistic", "C": 0.1, "groups": [k for k, _, _, d, _ in LAB_GROUPS if d]}}
+    path = SITE / "lab_hist.json"
+    old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if old.get("version") != LAB_VERSION or old.get("season") != season:
+        past = rows[rows.season < season]
+        write("lab_hist.json", {**meta, **lab_columns(past, nba.lab_features(past), market)})
+    cur = rows[rows.season == season]
+    closing = odds.closing_lines()[["date", "home", "away", "p_home"]].rename(columns={"p_home": "p_close"})
+    live_market = market.merge(closing, on=["date", "home", "away"], how="outer")
+    live_market["p_market"] = live_market.p_close.fillna(live_market.p_market)
+    payload = {**meta, **lab_columns(cur, nba.lab_features(cur), live_market[["date", "home", "away", "p_market"]])}
+    if len(slate):
+        sl = lab_columns(slate, nba.lab_features(slate), market.iloc[:0])
+        payload["slate"] = {"id": slate.game_id.tolist(), "home": sl["home"], "away": sl["away"], "elo_prob": sl["elo_prob"], "X": sl["X"]}
+    write("lab_live.json", payload)
 
 
 # ---------------------------------------------------------------- main
@@ -227,7 +347,8 @@ def main(date=None, refresh=True):
     joblib.dump(models, nba.MODELS / "model.joblib")
 
     # a week ahead so every team has a next game for the power rankings
-    g, window, roster, unmatched = nba.prepare(start, start + pd.Timedelta(days=8), rated=rated, models=models)
+    force_out, force_in = scratches(start)
+    g, window, roster, unmatched = nba.prepare(start, start + pd.Timedelta(days=8), force_out, force_in, rated=rated, models=models)
     season = nba.current_season(start.date())
     unplayed = window[window.home_pts.isna()]
     slate_day = unplayed.date.min() if len(unplayed) else None
@@ -238,22 +359,46 @@ def main(date=None, refresh=True):
     write("slate.json", {"date": f"{slate_day:%Y-%m-%d}" if slate_day is not None else None, "games": games,
                          "unmatched_injuries": sorted(unmatched)})
 
-    # record: frozen live picks plus last season's walk-forward backtest
-    log = update_log(slate, now.isoformat(timespec="minutes"))
-    # graded by date and teams: ids changed source once (stats.nba.com -> ESPN)
-    res = g[g.home_pts.notna()].assign(date=lambda d: d.date.dt.strftime("%Y-%m-%d"))[["date", "home", "away", "home_pts", "away_pts"]]
-    graded = log.merge(res, on=["date", "home", "away"], how="left")
+    # record: every game this season, graded, next to the closing betting line. Live picks were
+    # published before tipoff; games from before the site launched are backfilled by a model trained
+    # only on earlier seasons, using the same pre-game features (marked "backfill").
+    log = update_log(slate, now)
+    played = hist[(hist.season == season) & hist.home_pts.notna()]
+    back = pd.DataFrame(columns=["date", "home", "away", "p_back", "home_pts", "away_pts"])
+    if len(played):
+        pre_season_model = nba.fit_final(nba.training_rows(hist[hist.season < season]))
+        back = pd.DataFrame({"date": played.date.dt.strftime("%Y-%m-%d"), "home": played.home, "away": played.away,
+                             "p_back": nba.predict_proba(pre_season_model, played),
+                             "home_pts": played.home_pts, "away_pts": played.away_pts})
+    keys = ["date", "home", "away"]
+    graded = back.merge(log[keys + ["game_id", "p_home"]], on=keys, how="outer")
+    graded["source"] = np.where(graded.p_home.notna(), "live", "backfill")
+    graded["p_home"] = graded.p_home.fillna(graded.p_back)
+    # closing line: The Odds API's last pre-tip snapshot, else ESPN's line
+    closing = odds.closing_lines()[keys + ["p_home", "home_ml", "away_ml"]].rename(columns={"p_home": "p_close"})
+    espn_lines = historical_market()
+    graded = graded.merge(closing, on=keys, how="left").merge(espn_lines, on=keys, how="left")
+    graded["p_market"] = graded.p_close.fillna(graded.p_market)
+    graded = graded.sort_values(["date", "home"], ascending=False)
     done = graded[graded.home_pts.notna()]
     y = (done.home_pts > done.away_pts).astype(int)
-    picks = [{"id": x.game_id, "date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home),
-              "score": None if math.isnan(x.home_pts) else [int(x.away_pts), int(x.home_pts)]}
-             for x in graded.sort_values(["date", "game_id"], ascending=False).itertuples()]
+    live = done.source == "live"
+    picks = [{"date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home), "source": x.source,
+              "p_market": r(x.p_market), "ml": None if pd.isna(x.home_ml) else [int(x.away_ml), int(x.home_ml)],
+              "score": None if pd.isna(x.home_pts) else [int(x.away_pts), int(x.home_pts)]}
+             for x in graded.itertuples()]
+    vs = lambda d, yy: versus_market(pd.DataFrame({"p": d.p_home.values, "p_market": d.p_market.values, "y": yy.values}))
+    write("record.json", {"season": summary(done.p_home, y), "live": summary(done.p_home[live], y[live]),
+                          "vs_market": vs(done, y), "vs_market_live": vs(done[live], y[live]),
+                          "first_live": log.date.min() if len(log) else None, "picks": picks})
+
+    write_lab(hist, slate, season)
+
+    # full walk-forward backtest; recomputed when a season finishes or the model changes
     bt_path = SITE / "backtest.json"
     bt = json.loads(bt_path.read_text(encoding="utf-8")) if bt_path.exists() else {}
-    if bt.get("season") != nba.season_str(season - 1):
-        bt = backtest_season(hist, season - 1)
-        write("backtest.json", bt)
-    write("record.json", {"live": summary(done.p_home, y), "picks": picks})
+    if bt.get("version") != BACKTEST_VERSION or bt.get("through") != nba.season_str(season - 1):
+        write("backtest.json", backtest_all(hist))
 
     # teams
     records = season_records(g, season)
@@ -289,12 +434,19 @@ def main(date=None, refresh=True):
         })
     write("teams.json", {"date": f"{start:%Y-%m-%d}", "season": nba.season_str(season), "teams": out})
     write("players.json", player_table(roster, rated[0]))
-    played = nba.training_rows(hist)
+    trained = nba.training_rows(hist)
+    pipe = models["logistic"]
+    scaler, lr = pipe[0], pipe[-1]
     write("meta.json", {
         "generated_at": now.isoformat(timespec="minutes"), "season": nba.season_str(season),
         "slate_date": f"{slate_day:%Y-%m-%d}" if slate_day is not None else None,
-        "trained_games": int(len(played)), "trained_through": f"{played.date.max():%Y-%m-%d}",
-        "last_results_date": f"{played.date.max():%Y-%m-%d}",
+        "trained_games": int(len(trained)), "trained_through": f"{trained.date.max():%Y-%m-%d}",
+        "last_results_date": f"{trained.date.max():%Y-%m-%d}",
+        # standardized logistic coefficients: log-odds change per one-SD change in each feature
+        "model": {"intercept": r(lr.intercept_[0], 4), "C": lr.C, "features": [
+            {"name": f, "coef": r(c, 4), "mean": r(mu, 4), "sd": r(sd, 4)}
+            for f, c, mu, sd in zip(nba.features(trained.head(1)).columns, lr.coef_[0], scaler.mean_, scaler.scale_)]},
+        "priors": {b: {k: r(v, 3) for k, v in p.items()} for b, p in rated[2].items()},
     })
     print(f"Wrote site data: {len(games)} games on {slate_day:%Y-%m-%d}" if games else "Wrote site data: no upcoming games")
     return [str(d) for d in pending]      # days whose games weren't final yet

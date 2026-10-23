@@ -1,0 +1,45 @@
+name: Late scratch
+on:
+  workflow_dispatch:
+    inputs:
+      out:
+        description: "Players who won't play (comma-separated, e.g. Jalen Brunson, Josh Hart)"
+        required: false
+        default: ""
+      back:
+        description: "Players listed as out who WILL play (optional)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: publish
+  cancel-in-progress: false
+jobs:
+  scratch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Record the scratch and republish today's picks
+        env:
+          OUT: ${{ inputs.out }}
+          BACK: ${{ inputs.back }}
+        run: |
+          python scratch.py --out "$OUT" --in "$BACK"
+          python export.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/overrides.csv site/data data/espn log/predictions.csv log/rankings.csv
+          git commit -m "Late scratch: ${OUT}${BACK:+ / back: $BACK}"
+          git pull --rebase origin main && git push origin HEAD:main
+  deploy:
+    needs: scratch
+    uses: ./.github/workflows/pages.yml

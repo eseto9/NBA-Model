@@ -22,6 +22,13 @@ async function load() {
   [D.slate, D.teams, D.players, D.record, D.backtest] = await Promise.all(
     ["slate.json", "teams.json", "players.json", "record.json", "backtest.json"].map((f) => get(f, v)));
   D.teamBy = Object.fromEntries(D.teams.teams.map((t) => [t.abbr, t]));
+  // betting lines refresh hourly, separately from the morning model run
+  D.odds = await fetch(`data/odds.json?v=${Date.now()}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) || { games: {} };
+  for (const g of D.slate.games) {
+    const key = `${g.date}|${g.away.abbr}|${g.home.abbr}`;
+    g.market = D.odds.games[key] || null;
+    g.spread = (D.odds.spreads || {})[key] || null;      // display only; never a model input
+  }
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -56,6 +63,35 @@ function colorsClash(a, b) {
 const surname = (name) => name.replace(/\s+(Jr\.?|Sr\.?|II|III|IV)$/, "").split(" ").slice(-1)[0];
 const badge = (abbr, color) => `<span class="badge" style="background:${esc(color)}">${esc(abbr)}</span>`;
 const confidence = (g) => Math.max(g.p_home, 1 - g.p_home);
+const ml = (v) => (v == null ? "—" : v > 0 ? `+${v}` : `${v}`);
+const fairMl = (p) => (p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p));
+const btSpan = () => `${D.backtest.first}–${D.backtest.through.slice(-5)}`;
+/* Inverse standard normal CDF (Acklam's rational approximation, |error| < 1.2e-9) */
+function normInv(p) {
+  const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
+  const b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
+  const c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878];
+  const d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742];
+  const q = Math.min(Math.max(p, 1e-9), 1 - 1e-9), lo = 0.02425;
+  if (q < lo) { const r = Math.sqrt(-2 * Math.log(q)); return (((((c[0] * r + c[1]) * r + c[2]) * r + c[3]) * r + c[4]) * r + c[5]) / ((((d[0] * r + d[1]) * r + d[2]) * r + d[3]) * r + 1); }
+  if (q > 1 - lo) return -normInv(1 - q);
+  const r = q - 0.5, t = r * r;
+  return (((((a[0] * t + a[1]) * t + a[2]) * t + a[3]) * t + a[4]) * t + a[5]) * r / (((((b[0] * t + b[1]) * t + b[2]) * t + b[3]) * t + b[4]) * t + 1);
+}
+/* Spread implied by a win probability, assuming the final margin is normal with SD 12 points */
+const MARGIN_SD = 12;
+function impliedSpread(g, p) {
+  const margin = MARGIN_SD * normInv(p);            // expected home margin
+  const fav = margin >= 0 ? g.home.abbr : g.away.abbr;
+  return Math.abs(margin) < 0.25 ? "PK" : `${fav} −${Math.abs(margin).toFixed(1)}`;
+}
+
+/* model minus market, in points, from the side the model likes more than the market does */
+function edge(g) {
+  if (!g.market) return null;
+  const d = g.p_home - g.market.p_home;
+  return { team: d >= 0 ? g.home.abbr : g.away.abbr, pts: Math.abs(d) * 100 };
+}
 function ratingColor(gmsc) {                // sequential: light -> dark orange by player rating
   const t = clamp((gmsc - 6) / 16, 0, 1);
   return `color-mix(in oklab, var(--orange) ${Math.round(25 + t * 75)}%, var(--card-2))`;
@@ -106,7 +142,9 @@ function gameTags(g) {
   const c = confidence(g), tags = [];
   if (c >= 0.75) tags.push(`<span class="tag hot">Lock</span>`);
   else if (c < 0.56) tags.push(`<span class="tag toss">Toss-up</span>`);
-  if ((g.p_home - 0.5) * (g.p_elo - 0.5) < 0) tags.push(`<span class="tag">Model ≠ Elo</span>`);
+  const e = edge(g);
+  if (e && e.pts >= 5) tags.push(`<span class="tag edge" title="The model gives ${esc(e.team)} ${e.pts.toFixed(1)} points more than the betting market">Edge ${esc(e.team)} +${e.pts.toFixed(0)}</span>`);
+  else if ((g.p_home - 0.5) * (g.p_elo - 0.5) < 0) tags.push(`<span class="tag">Model ≠ Elo</span>`);
   if (g.neutral) tags.push(`<span class="tag">Neutral site</span>`);
   return tags.join(" ");
 }
@@ -117,7 +155,7 @@ function outsLine(g) {
     for (const p of side.rotation) {
       if (p.status !== "Healthy" && p.min >= 12) {
         const dtd = p.status === "Day-To-Day";
-        outs.push(`<span class="out ${dtd ? "dtd" : ""}" title="${esc(p.name)}: ${esc(p.status)}">${esc(side.abbr)} ${esc(surname(p.name))}${dtd ? " ?" : ""}</span>`);
+        outs.push(`<span class="out ${dtd ? "dtd" : ""} ${p.manual ? "manual" : ""}" title="${esc(p.name)}: ${esc(p.status)}${p.manual ? " (late scratch)" : ""}">${esc(side.abbr)} ${esc(surname(p.name))}${dtd ? " ?" : ""}</span>`);
       }
     }
   }
@@ -131,6 +169,15 @@ function teamBlock(side, cls, picked) {
     <div style="min-width:0"><div class="team-name">${esc(side.name)}</div><div class="team-sub">${rec}</div></div></div>`;
 }
 
+function marketLine(g) {
+  const m = g.market;
+  const sp = g.spread ? ` · <span title="${esc(g.spread.provider || "")} spread and total, display only">${esc(g.spread.text)}${g.spread.total ? `, O/U ${g.spread.total}` : ""}</span>` : "";
+  if (!m) return `<div class="mkt-line muted">${g.spread ? `Spread ${esc(g.spread.text)}${g.spread.total ? `, O/U ${g.spread.total}` : ""}` : "Betting line not posted yet"}</div>`;
+  const fav = m.p_home >= 0.5 ? g.home.abbr : g.away.abbr;
+  return `<div class="mkt-line"><span class="mkt-dot"></span>Market <b>${esc(fav)} ${pct(Math.max(m.p_home, 1 - m.p_home))}</b>
+    <span class="muted">${esc(g.away.abbr)} ${ml(m.away_ml)} · ${esc(g.home.abbr)} ${ml(m.home_ml)}${sp}</span></div>`;
+}
+
 function gameCard(g) {
   const pa = 1 - g.p_home, open = state.open === g.id;
   const awayColor = colorsClash(g.away.color, g.home.color) ? "#8a857b" : g.away.color;
@@ -138,11 +185,15 @@ function gameCard(g) {
     <div class="game-top"><span class="mono muted">${tipLabel(g.tip)}</span><span>${gameTags(g)}</span></div>
     <div class="matchup">${teamBlock(g.away, "away", g.pick === g.away.abbr)}<span class="at">@</span>${teamBlock(g.home, "home", g.pick === g.home.abbr)}</div>
     <div class="tug">
-      <div class="tug-bar" role="img" aria-label="${esc(g.away.abbr)} ${pct(pa)}, ${esc(g.home.abbr)} ${pct(g.p_home)}">
-        <i style="background:${esc(awayColor)}" data-flex="calc(${pct(pa, 1)} - 1px)"></i><i style="background:${esc(g.home.color)}" data-flex="calc(${pct(g.p_home, 1)} - 1px)"></i>
-        <span class="tug-mid"></span></div>
+      <div class="tug-wrap">
+        <div class="tug-bar" role="img" aria-label="${esc(g.away.abbr)} ${pct(pa)}, ${esc(g.home.abbr)} ${pct(g.p_home)}">
+          <i style="background:${esc(awayColor)}" data-flex="calc(${pct(pa, 1)} - 1px)"></i><i style="background:${esc(g.home.color)}" data-flex="calc(${pct(g.p_home, 1)} - 1px)"></i>
+          <span class="tug-mid"></span></div>
+        ${g.market ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${g.market.books} sportsbooks"></span>` : ""}
+      </div>
       <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
     </div>
+    ${marketLine(g)}
     <div class="outs">${outsLine(g)}</div>
     <span class="expand-hint">details →</span>
     ${open ? `<button class="close" aria-label="Close">✕</button>${gameDetail(g)}` : ""}
@@ -210,16 +261,51 @@ function compare(g) {
 
 function rotationCol(side) {
   return `<div><div class="rot-head">${badge(side.abbr, side.color)}${esc(side.name)}</div>
-    ${side.rotation.map((p) => `<div class="pl ${esc(p.status)}" data-tip="<b>${esc(p.name)}</b><br>${esc(p.status)} · ${p.min} exp. min<br>Game Score/36 ${p.gmsc} · PIE ${pct(p.pie, 1)} · on-court net ${p.net > 0 ? "+" : ""}${p.net}">
-      <span class="pl-name">${esc(p.name)}</span>
+    ${side.rotation.map((p) => `<div class="pl ${esc(p.status)}" data-tip="<b>${esc(p.name)}</b><br>${esc(p.status)}${p.manual ? " (late scratch, entered manually)" : ""} · ${p.min} exp. min<br>Game Score/36 ${p.gmsc} · PIE ${pct(p.pie, 1)} · on-court net ${p.net > 0 ? "+" : ""}${p.net}">
+      <span class="pl-name">${esc(p.name)}${p.manual ? ` <span class="tag scratch">scratch</span>` : ""}</span>
       <div class="pl-bar"><i style="background:${ratingColor(p.gmsc)}" data-w="${pct(clamp(p.min / 38, 0.05, 1))}"></i></div></div>`).join("")}</div>`;
+}
+
+function lineMovement(g) {
+  const h = g.market.history;
+  if (h.length < 2) return `<p class="mono muted" style="margin:8px 0 0">Line movement appears after the next odds update.</p>`;
+  const W = 520, H = 130, m = { l: 40, r: 70, t: 10, b: 22 };
+  const ts = h.map(([t]) => Date.parse(t)), ps = h.map(([, p]) => p);
+  const lo = Math.min(...ps, g.p_home) - 0.03, hi = Math.max(...ps, g.p_home) + 0.03;
+  const x = (t) => m.l + ((t - ts[0]) / Math.max(ts[ts.length - 1] - ts[0], 1)) * (W - m.l - m.r);
+  const y = (p) => m.t + (1 - (p - lo) / (hi - lo)) * (H - m.t - m.b);
+  const hr = (t) => new Date(t).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric" });
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Market probability over time">`;
+  for (const p of [lo + 0.03, hi - 0.03]) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(p)}" y2="${y(p)}"/><text x="${m.l - 6}" y="${y(p) + 4}" text-anchor="end">${pct(p)}</text>`;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(g.p_home)}" y2="${y(g.p_home)}" stroke="var(--orange)" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="${W - m.r + 6}" y="${y(g.p_home) + 4}" style="fill:var(--orange)">model</text>`;
+  s += `<polyline class="draw" points="${h.map(([t, p]) => `${x(Date.parse(t))},${y(p)}`).join(" ")}" fill="none" stroke="var(--slate)" stroke-width="2"/>`;
+  h.forEach(([t, p]) => (s += `<circle cx="${x(Date.parse(t))}" cy="${y(p)}" r="3.5" fill="var(--slate)" data-tip="${hr(Date.parse(t))} ET · market ${esc(g.home.abbr)} ${pct(p, 1)}"/>`));
+  s += `<text x="${W - m.r + 6}" y="${y(ps[ps.length - 1]) + 4}" style="fill:var(--slate)">market</text>`;
+  s += `<text x="${m.l}" y="${H - 4}">${hr(ts[0])}</text><text x="${W - m.r}" y="${H - 4}" text-anchor="end">${hr(ts[ts.length - 1])}</text></svg>`;
+  return s;
+}
+
+function marketPanel(g) {
+  const m = g.market;
+  if (!m) return "";
+  const row = (side, p, pm, line, best) => `<tr><td><div class="tm">${badge(side.abbr, side.color)}${esc(side.abbr)}</div></td>
+    <td class="r mono">${pct(p)}</td><td class="r mono">${pct(pm)}</td><td class="r mono">${ml(fairMl(p))}</td><td class="r mono">${ml(line)} <span class="muted">(best ${ml(best)})</span></td></tr>`;
+  const e = edge(g);
+  return `<h4>Model vs betting market</h4>
+    <table class="mkt-table"><thead><tr><th></th><th class="r">Model</th><th class="r">Market</th><th class="r">Model's fair odds</th><th class="r">Market odds</th></tr></thead><tbody>
+      ${row(g.away, 1 - g.p_home, 1 - m.p_home, m.away_ml, m.away_best)}${row(g.home, g.p_home, m.p_home, m.home_ml, m.home_best)}</tbody></table>
+    ${g.spread ? `<p class="mono" style="margin:10px 0 0">Spread <b>${esc(g.spread.text)}</b>${g.spread.total ? ` · total ${g.spread.total}` : ""} <span class="muted">(${esc(g.spread.provider || "")}, display only)</span> · model ≈ <b>${impliedSpread(g, g.p_home)}</b> <span class="muted" title="Converts the model's win probability to a point spread, assuming the final margin is normal with SD ${MARGIN_SD}">ⓘ</span></p>` : ""}
+    <p class="mono muted" style="margin:8px 0 4px">${e.pts < 1 ? "Model and market agree." : `Model is ${e.pts.toFixed(1)} pts higher on ${esc(e.team)} than the market.`} Market = average of ${m.books} sportsbooks with their margin removed.</p>
+    ${lineMovement(g)}`;
 }
 
 function gameDetail(g) {
   return `<div class="detail">
-    <div><h4>Why the model leans ${esc(g.pick)}</h4>${waterfall(g)}
+    <div><h4>Why the ${g.p_default != null ? "default " : ""}model leans ${esc(g.p_default != null ? (g.p_default >= 0.5 ? g.home.abbr : g.away.abbr) : g.pick)}</h4>${waterfall(g)}
+      ${g.p_default != null ? `<p class="mono muted">Your custom model says ${esc(g.home.abbr)} ${pct(g.p_home)}; this breakdown is for the default model (${pct(g.p_default)}).</p>` : ""}
       <h4 style="margin-top:22px">Tale of the tape</h4>${compare(g)}</div>
-    <div><h4>Projected rotations</h4><div class="rot">${rotationCol(g.away)}${rotationCol(g.home)}</div>
+    <div>${g.market ? `${marketPanel(g)}<div style="height:22px"></div>` : ""}<h4>Projected rotations</h4><div class="rot">${rotationCol(g.away)}${rotationCol(g.home)}</div>
       <div class="legend"><span><i style="background:var(--orange)"></i>bar = expected minutes, darker = better rating</span><span><i style="background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 5px)"></i>out</span><span><i style="background:repeating-linear-gradient(135deg,var(--orange) 0 2px,transparent 2px 5px)"></i>day-to-day</span></div>
       <p class="mono muted" style="margin-top:16px">Elo alone: ${esc(g.home.abbr)} ${pct(g.p_elo)} · model: ${esc(g.home.abbr)} ${pct(g.p_home)}</p></div>
   </div>`;
@@ -233,25 +319,48 @@ function filteredGames() {
   return gs;
 }
 
+/* Best value: highest expected return per $1 at the best available price, using the model's probability */
+function bestValue(games) {
+  let best = null;
+  for (const g of games) {
+    if (!g.market) continue;
+    for (const [side, p, price, pm] of [[g.home, g.p_home, g.market.home_best, g.market.p_home], [g.away, 1 - g.p_home, g.market.away_best, 1 - g.market.p_home]]) {
+      const dec = price > 0 ? 1 + price / 100 : 1 + 100 / -price;
+      const ev = p * dec - 1;
+      if (!best || ev > best.ev) best = { g, side, p, pm, price, ev };
+    }
+  }
+  return best;
+}
+
 function lockCard(games) {
   if (!games.length) return `<div class="lock"><div class="label">No games scheduled</div><p>Check back on the next game day.</p></div>`;
-  const g = games.reduce((a, b) => (confidence(b) > confidence(a) ? b : a));
-  const c = confidence(g), side = g.p_home >= 0.5 ? g.home : g.away, opp = side === g.home ? g.away : g.home;
+  const conf = games.reduce((a, b) => (confidence(b) > confidence(a) ? b : a));
+  const v = bestValue(games);
+  const useValue = v && v.ev > 0;
+  const g = useValue ? v.g : conf;
+  const side = useValue ? v.side : g.p_home >= 0.5 ? g.home : g.away, opp = side === g.home ? g.away : g.home;
+  const c = useValue ? v.p : confidence(g);
   const R = 56, C = 2 * Math.PI * R;
   const first = games.map((x) => x.tip).filter(Boolean).sort()[0];
-  const toss = games.reduce((a, b) => (confidence(b) < confidence(a) ? b : a));
+  const label = useValue ? "Best value vs the odds" : v ? "Strongest pick · no edge on the market today" : "Strongest pick · odds not posted yet";
+  const confSide = conf.p_home >= 0.5 ? conf.home : conf.away;
   return `<div class="lock">
-    <div class="label">Strongest pick · ${dayLabel(D.slate.date, { weekday: "short", month: "short", day: "numeric" })}</div>
+    <div class="label">${label} · ${dayLabel(D.slate.date, { weekday: "short", month: "short", day: "numeric" })}</div>
     <div class="lock-body">
       <div class="gauge"><svg viewBox="0 0 132 132" width="132" height="132">
         <circle cx="66" cy="66" r="${R}" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="11"/>
-        <circle class="arc" cx="66" cy="66" r="${R}" fill="none" stroke="var(--orange)" stroke-width="11" stroke-linecap="round"
-          stroke-dasharray="${C}" stroke-dashoffset="${C}" data-dash="${C * (1 - c)}"/></svg>
-        <div class="gauge-val"><div><b data-count="${(c * 100).toFixed(0)}" data-suf="%">0%</b><small>to win</small></div></div></div>
+        ${useValue ? `<circle cx="66" cy="66" r="${R}" fill="none" stroke="var(--slate)" stroke-width="11" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-dash="${C * (1 - v.pm)}" class="arc" opacity=".9"/>` : ""}
+        <circle class="arc" cx="66" cy="66" r="${R - (useValue ? 13 : 0)}" fill="none" stroke="var(--orange)" stroke-width="11" stroke-linecap="round"
+          stroke-dasharray="${2 * Math.PI * (R - (useValue ? 13 : 0))}" stroke-dashoffset="${2 * Math.PI * (R - (useValue ? 13 : 0))}" data-dash="${2 * Math.PI * (R - (useValue ? 13 : 0)) * (1 - c)}"/></svg>
+        <div class="gauge-val"><div><b data-count="${(c * 100).toFixed(0)}" data-suf="%">0%</b><small>${useValue ? "model" : "to win"}</small></div></div></div>
       <div><div class="lock-team">${esc(side.name)}</div>
-        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)} · ${tipLabel(g.tip)}</div></div>
+        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)} · ${tipLabel(g.tip)}</div>
+        ${useValue ? `<div class="lock-ev"><b>+${(v.ev * 100).toFixed(1)}¢</b> expected per $1 at ${ml(v.price)}</div>
+          <div class="lock-sub">model ${pct(v.p)} <span style="color:var(--orange)">●</span> market ${pct(v.pm)} <span style="color:var(--slate)">●</span></div>` : ""}</div>
     </div>
-    <div class="lock-row"><span>Closest call</span><a href="#/game/${toss.id}">${esc(toss.away.abbr)} @ ${esc(toss.home.abbr)} · ${pct(confidence(toss))} ${esc(toss.pick)}</a></div>
+    ${useValue ? `<div class="lock-row"><span>Most likely winner</span><a href="#/game/${conf.id}">${esc(confSide.abbr)} ${pct(confidence(conf))} · ${esc(conf.away.abbr)} @ ${esc(conf.home.abbr)}</a></div>` : ""}
+    <div class="lock-row" ${useValue ? 'style="border:0;padding-top:8px"' : ""}><span>Open this game</span><a href="#/game/${g.id}">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} →</a></div>
     <div class="lock-row" style="border:0;padding-top:8px"><span>First tip</span><span class="countdown" data-tip-at="${esc(first || "")}">${tipLabel(first)}</span></div>
   </div>`;
 }
@@ -259,23 +368,27 @@ function lockCard(games) {
 function lastResults() {
   const graded = D.record.picks.filter((p) => p.score);
   if (!graded.length) {
-    return `<div class="empty" style="padding:24px 8px">The live record starts with tonight's games.<br>Last season's backtest: <b>${pct(D.backtest.accuracy, 1)}</b> correct (${D.backtest.correct}/${D.backtest.n}).</div>`;
+    const o = D.backtest.overall;
+    return `<div class="empty" style="padding:24px 8px">No games graded yet this season.<br>Backtest ${btSpan()}: <b>${pct(o.accuracy, 1)}</b> correct (${o.correct.toLocaleString()} of ${o.n.toLocaleString()}).</div>`;
   }
   const day = graded[0].date, rows = graded.filter((p) => p.date === day);
   const hits = rows.filter(isHit).length;
-  return `<p class="mono muted" style="margin:0 0 8px">${dayLabel(day)} · ${hits}/${rows.length} correct</p>
+  return `<p class="mono muted" style="margin:0 0 8px">${dayLabel(day)} · ${hits}/${rows.length} correct · season ${D.record.season.correct}-${D.record.season.n - D.record.season.correct}</p>
     <table><tbody>${rows.map(pickRow).join("")}</tbody></table>`;
 }
 const isHit = (p) => (p.p_home >= 0.5) === (p.score[1] > p.score[0]);
 function pickRow(p) {
   const pick = p.p_home >= 0.5 ? p.home : p.away, conf = Math.max(p.p_home, 1 - p.p_home);
   const res = p.score ? (isHit(p) ? `<span class="hit">✓</span>` : `<span class="miss">✗</span>`) : `<span class="muted mono">pending</span>`;
-  return `<tr><td class="mono muted">${p.date.slice(5)}</td><td>${esc(p.away)} @ ${esc(p.home)}</td><td><b>${esc(pick)}</b> <span class="muted">${pct(conf)}</span></td>
-    <td class="mono">${p.score ? `${p.score[0]}–${p.score[1]}` : ""}</td><td class="r">${res}</td></tr>`;
+  const mkt = p.p_market == null ? `<span class="muted">—</span>`
+    : `${pct(pick === p.home ? p.p_market : 1 - p.p_market)}${p.ml ? ` <span class="muted">${ml(pick === p.home ? p.ml[1] : p.ml[0])}</span>` : ""}`;
+  const tag = p.source === "backfill" ? ` <span class="tag" title="Before the site launched: predicted afterwards by a model trained only on earlier seasons">backfill</span>` : "";
+  return `<tr><td class="mono muted">${p.date.slice(5)}</td><td>${esc(p.away)} @ ${esc(p.home)}${tag}</td><td><b>${esc(pick)}</b> <span class="muted">${pct(conf)}</span></td>
+    <td class="mono">${mkt}</td><td class="mono">${p.score ? `${p.score[0]}–${p.score[1]}` : ""}</td><td class="r">${res}</td></tr>`;
 }
 
 function viewSlate() {
-  const games = D.slate.games, live = D.record.live;
+  const games = D.slate.games, live = D.record.season;
   const nLocks = games.filter((g) => confidence(g) >= 0.7).length;
   const top = D.teams.teams.slice(0, 6);
   return `<section class="hero">
@@ -286,15 +399,16 @@ function viewSlate() {
       <div class="stats">
         <div class="stat"><b data-count="${games.length}">0</b><span>games ${D.slate.date ? dayLabel(D.slate.date, { weekday: "short" }) : ""}</span></div>
         <div class="stat"><b data-count="${nLocks}">0</b><span>picks ≥ 70%</span></div>
-        <div class="stat"><b data-count="${(D.backtest.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><span>right in ${esc(D.backtest.season)} backtest</span></div>
-        <div class="stat"><b>${live.n ? `${live.correct}-${live.n - live.correct}` : "0-0"}</b><span>live record</span></div>
+        <div class="stat"><b data-count="${(D.backtest.overall.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><span>right since ${esc(D.backtest.first)}</span></div>
+        <div class="stat"><b>${live.n ? `${live.correct}-${live.n - live.correct}` : "0-0"}</b><span>record this season</span></div>
       </div>
     </div>
     ${lockCard(games)}
   </section>
+  ${D.custom ? `<div class="custom-banner card"><span><b>Showing your custom model</b> · ${esc(describe({ ...D.custom }))}</span><a href="#/lab">Edit in Model Lab →</a></div>` : ""}
   <section>
     <div class="section-head">
-      <div><h2>${D.slate.date ? dayLabel(D.slate.date) : "No upcoming games"}</h2><p>Bars show each team's win probability. Tap a game to see why.</p></div>
+      <div><h2>${D.slate.date ? dayLabel(D.slate.date) : "No upcoming games"}</h2><p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <a class="scratch-link" href="https://github.com/eseto9/NBA-Model/actions/workflows/scratch.yml" target="_blank" rel="noopener">Report a late scratch ↗</a></p></div>
       <div class="chips">
         ${[["all", "All games"], ["locks", "Strong picks"], ["toss", "Close calls"]].map(([k, l]) => `<button class="chip ${state.filter === k ? "on" : ""}" data-filter="${k}">${l}</button>`).join("")}
         <span style="width:8px"></span>
@@ -320,13 +434,15 @@ function updatedLabel() {
 
 function eloChart() {
   const teams = D.teams.teams;
-  const dates = [...new Set(teams.flatMap((t) => t.elo_history.map((p) => p[0])))].sort();
+  // playoff games only involve half the league, so by default they're left out
+  const hist = (t) => t.elo_history.filter((p) => state.eloPlayoffs || !p[2]);
+  const dates = [...new Set(teams.flatMap((t) => hist(t).map((p) => p[0])))].sort();
   if (dates.length < 2) return `<div class="empty">Not enough games yet.</div>`;
   const idx = Object.fromEntries(dates.map((d, i) => [d, i]));
   const seasonOf = (d) => (+d.slice(5, 7) >= 8 ? +d.slice(0, 4) : +d.slice(0, 4) - 1);
   const series = teams.map((t) => {
     const arr = new Array(dates.length).fill(null), lastIdx = {};
-    t.elo_history.forEach(([d, e]) => { arr[idx[d]] = e; lastIdx[seasonOf(d)] = idx[d]; });
+    hist(t).forEach(([d, e]) => { arr[idx[d]] = e; lastIdx[seasonOf(d)] = idx[d]; });
     // carry a rating between a team's games, but not past its last game of a season
     for (let i = 1; i < arr.length; i++) {
       const s = seasonOf(dates[i]);
@@ -428,7 +544,10 @@ function viewRankings() {
         <span style="opacity:1;font:700 22px var(--display)" data-count="${(t.power * 100).toFixed(0)}" data-suf="%">0%</span></div>`).join("")}
     </div>
   </section>
-  <section class="card panel"><div class="panel-head"><h3>Elo rating over time</h3><span class="mono muted">hover a line · click a team below</span></div>${eloChart()}</section>
+  <section class="card panel"><div class="panel-head"><h3>Elo rating over time</h3>
+    <div class="chips"><span class="mono muted" style="margin-right:6px">hover a line · click a team below</span>
+      <button class="chip ${state.eloPlayoffs ? "" : "on"}" data-elo-po="0">Regular season</button><button class="chip ${state.eloPlayoffs ? "on" : ""}" data-elo-po="1">Including playoffs</button></div></div>
+    <div id="elo-wrap">${eloChart()}</div></section>
   ${movers()}
   <section class="card" style="margin-top:14px"><div class="table-wrap"><table id="rank-table">
     <thead><tr><th>#</th><th></th><th>Team</th><th class="r">Record</th><th>vs. average team</th><th class="r">Elo</th><th class="r">Net rtg</th><th class="r">Lineup</th><th>Missing</th></tr></thead>
@@ -496,22 +615,60 @@ function calibrationChart() {
   let s = `<svg class="chart" id="calib" viewBox="0 0 ${W} ${H}" role="img" aria-label="Calibration: predicted confidence versus actual win rate">`;
   for (let v = 0.3; v <= 1.001; v += 0.1) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v * 100)}%</text>`;
   for (let v = 0.5; v <= 1.001; v += 0.1) s += `<text x="${x(v)}" y="${H - 18}" text-anchor="middle">${Math.round(v * 100)}%</text>`;
-  s += `<text x="${(m.l + W - m.r) / 2}" y="${H - 2}" text-anchor="middle">model's confidence in its pick</text>`;
+  s += `<text x="${(m.l + W - m.r) / 2}" y="${H - 2}" text-anchor="middle">confidence in the favorite</text>`;
   s += `<line x1="${x(0.5)}" y1="${y(0.5)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--muted)" stroke-dasharray="4 4"/><text x="${x(0.93)}" y="${y(0.97) - 4}" text-anchor="end">perfect calibration</text>`;
-  const series = [["Backtest " + D.backtest.season, D.backtest.calibration, "var(--slate)"], ["Live " + D.meta.season, D.record.live.calibration || [], "var(--orange)"]];
+  const series = [
+    ["Model, backtest", D.backtest.overall.calibration, "var(--orange)"],
+    ["Betting market", D.backtest.vs_market.market?.calibration || [], "var(--slate)"],
+    ["Model, " + D.meta.season + " so far", D.record.season.calibration || [], "var(--ink)"],
+  ];
+  // bins with fewer than 10 games are too noisy to plot
+  series.forEach((sr) => (sr[1] = sr[1].filter((p) => p.n >= 10).map((p) => ({ ...p, actual: clamp(p.actual, 0.3, 1) }))));
   series.forEach(([name, pts, col], si) => {
     if (pts.length > 1) s += `<polyline class="draw" points="${pts.map((p) => `${x(p.pred)},${y(p.actual)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="2"/>`;
     pts.forEach((p, i) => {
-      s += `<circle class="pop" style="animation-delay:${0.08 * i + si * 0.3}s" cx="${x(p.pred)}" cy="${y(p.actual)}" r="${clamp(Math.sqrt(p.n) * 0.75, 4, 14)}" fill="${col}" stroke="var(--card)" stroke-width="2"
-        data-tip="<b>${esc(name)}</b><br>Picks at ${Math.round(p.lo * 100)}–${Math.round(p.hi * 100)}%: ${p.n}<br>Predicted ${pct(p.pred, 1)} · won ${pct(p.actual, 1)}"/>`;
+      s += `<circle class="pop" style="animation-delay:${0.08 * i + si * 0.3}s" cx="${x(p.pred)}" cy="${y(p.actual)}" r="${clamp(Math.sqrt(p.n) * 0.3, 4, 12)}" fill="${col}" stroke="var(--card)" stroke-width="2"
+        data-tip="<b>${esc(name)}</b><br>Favorites at ${Math.round(p.lo * 100)}–${Math.round(p.hi * 100)}%: ${p.n.toLocaleString()} games<br>Predicted ${pct(p.pred, 1)} · won ${pct(p.actual, 1)}"/>`;
     });
   });
-  s += `</svg><div class="legend">${series.map(([n, pts, c]) => `<span><i style="background:${c};border-radius:50%;width:9px;height:9px"></i>${esc(n)}${pts.length ? "" : " (no games yet)"}</span>`).join("")}<span>dot size = number of games</span></div>`;
+  s += `</svg><div class="legend">${series.map(([n, pts, c]) => `<span><i style="background:${c};border-radius:50%;width:9px;height:9px"></i>${esc(n)}${pts.length ? "" : " (not enough games yet)"}</span>`).join("")}<span>dot size = games · bins with 10+ games</span></div>`;
+  return s;
+}
+
+/* Model vs market accuracy, season by season */
+function seasonChart() {
+  const ss = D.backtest.seasons;
+  const W = 1100, H = 300, m = { l: 46, r: 16, t: 18, b: 34 }, lo = 0.55, hi = 0.75;
+  const band = (W - m.l - m.r) / ss.length, bw = Math.min(26, band / 2 - 4);
+  const y = (v) => m.t + (1 - (clamp(v, lo, hi) - lo) / (hi - lo)) * (H - m.t - m.b);
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Accuracy by season, model versus betting market">`;
+  for (let v = lo; v <= hi + 0.001; v += 0.05) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v * 100)}%</text>`;
+  ss.forEach((q, i) => {
+    const cx = m.l + band * (i + 0.5), vm = q.vs_market;
+    const bars = [["Model", q.accuracy, "var(--orange)"]];
+    if (vm.n) bars.push(["Market", vm.market.accuracy, "var(--slate)"]);
+    const tip = `<b>${esc(q.season)}</b><br>Model ${pct(q.accuracy, 1)} of ${q.n} games` + (vm.n
+      ? `<br>On the ${vm.n} games with a line:<br>model ${pct(vm.model.accuracy, 1)} · market ${pct(vm.market.accuracy, 1)}<br>disagreed ${vm.disagree_n}×, model right ${vm.disagree_model_right}`
+      : "<br>No betting lines this season");
+    bars.forEach(([, v, col], j) => {
+      const bx = bars.length === 1 ? cx - bw / 2 : cx + (j ? 1 : -bw - 1);
+      s += `<rect class="growy" style="animation-delay:${0.04 * i}s" x="${bx}" y="${y(v)}" width="${bw}" height="${y(lo) - y(v)}" rx="4" fill="${col}" data-tip="${tip}"/>`;
+    });
+    s += `<text x="${cx}" y="${H - 14}" text-anchor="middle">${q.season.slice(2, 4)}-${q.season.slice(-2)}</text>`;
+  });
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(lo)}" y2="${y(lo)}" class="axis"/></svg>
+    <div class="legend"><span><i style="background:var(--orange)"></i>Tipoff model (every game)</span><span><i style="background:var(--slate)"></i>Betting favorite (games with an ESPN line)</span><span>hover a season for the head-to-head</span></div>`;
   return s;
 }
 
 function rollingChart() {
-  const daily = D.backtest.daily, N = 150;
+  const sel = state.rollSeason || "all";
+  let daily = D.backtest.daily;
+  if (sel !== "all") {
+    const y0 = +sel.slice(0, 4);
+    daily = daily.filter(([d]) => d >= `${y0}-08-01` && d < `${y0 + 1}-08-01`);
+  }
+  const N = sel === "all" ? 400 : 150;
   const games = [];
   daily.forEach(([d, h, c]) => { for (let i = 0; i < c; i++) games.push([d, i < h ? 1 : 0]); });
   const pts = [];
@@ -521,20 +678,23 @@ function rollingChart() {
     if (i >= N) sum -= games[i - N][1];
     if (i >= N - 1 && (i === games.length - 1 || games[i + 1][0] !== g[0])) pts.push([g[0], sum / N]);
   });
-  const W = 540, H = 330, m = { l: 46, r: 16, t: 16, b: 38 }, lo = 0.5, hi = 0.85;
-  const x = (i) => m.l + (i / (pts.length - 1)) * (W - m.l - m.r), y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
-  let s = `<svg class="chart" id="roll" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rolling accuracy over last season">`;
+  const acc = games.reduce((a, g) => a + g[1], 0) / games.length;
+  const W = 1100, H = 280, m = { l: 46, r: 16, t: 16, b: 34 }, lo = 0.5, hi = 0.85;
+  const x = (i) => m.l + (i / Math.max(pts.length - 1, 1)) * (W - m.l - m.r), y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
+  let s = `<svg class="chart" id="roll" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rolling accuracy">`;
   for (let v = lo; v <= hi + 0.001; v += 0.05) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${Math.round(v * 100)}%</text>`;
-  let lastMo = "";
-  pts.forEach(([d], i) => { if (d.slice(0, 7) !== lastMo) { lastMo = d.slice(0, 7); if (i < pts.length - 8) s += `<text x="${x(i)}" y="${H - 18}" text-anchor="start">${dayLabel(d, { month: "short" })}</text>`; } });
+  let last = "";
+  pts.forEach(([d], i) => {
+    const key = sel === "all" ? d.slice(0, 4) : d.slice(0, 7);
+    if (key !== last) { last = key; if (i < pts.length - 6) s += `<text x="${x(i)}" y="${H - 12}">${sel === "all" ? key : dayLabel(d, { month: "short" })}</text>`; }
+  });
   const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
   s += `<path d="${line}L${x(pts.length - 1)},${y(lo)}L${x(0)},${y(lo)}Z" fill="var(--orange)" opacity=".1"/>`;
-  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(D.backtest.accuracy)}" y2="${y(D.backtest.accuracy)}" stroke="var(--ink-2)" stroke-dasharray="4 4"/><text x="${W - m.r}" y="${y(D.backtest.accuracy) - 6}" text-anchor="end" class="lbl-ink">season ${pct(D.backtest.accuracy, 1)}</text>`;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(acc)}" y2="${y(acc)}" stroke="var(--ink-2)" stroke-dasharray="4 4"/><text x="${W - m.r}" y="${y(acc) - 6}" text-anchor="end" class="lbl-ink">average ${pct(acc, 1)}</text>`;
   s += `<path class="draw" d="${line}" fill="none" stroke="var(--orange)" stroke-width="2" stroke-linejoin="round"/>`;
   s += `<line id="roll-x" y1="${m.t}" y2="${H - m.b}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0"/><circle id="roll-dot" r="5" fill="var(--orange)" stroke="var(--card)" stroke-width="2" opacity="0"/>`;
-  s += `<rect id="roll-hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
-  s += `<text x="${(m.l + W - m.r) / 2}" y="${H - 2}" text-anchor="middle">accuracy over the previous ${N} games</text></svg>`;
-  rollingChart.ctx = { pts, x, y, W, m };
+  s += `<rect id="roll-hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg>`;
+  rollingChart.ctx = { pts, x, y, W, m, N };
   return s;
 }
 
@@ -548,64 +708,55 @@ function bindRolling() {
     for (const [id, attrs] of [["#roll-x", { x1: c.x(i), x2: c.x(i), opacity: 1 }], ["#roll-dot", { cx: c.x(i), cy: c.y(v), opacity: 1 }]]) {
       for (const [k, val] of Object.entries(attrs)) $(id).setAttribute(k, val);
     }
-    showTip(`<b>${pct(v, 1)}</b> correct<br>150 games through ${dayLabel(d, { month: "short", day: "numeric" })}`, e);
+    showTip(`<b>${pct(v, 1)}</b> correct<br>${c.N} games through ${dayLabel(d, { month: "short", day: "numeric", year: "numeric" })}`, e);
   });
   $("#roll-hit").addEventListener("mouseleave", () => { hideTip(); $("#roll-x").setAttribute("opacity", 0); $("#roll-dot").setAttribute("opacity", 0); });
 }
 
 function viewRecord() {
-  const live = D.record.live, bt = D.backtest;
+  const sea = D.record.season, live = D.record.live, o = D.backtest.overall, vm = D.backtest.vs_market, svm = D.record.vs_market || { n: 0 };
   const pending = D.record.picks.filter((p) => !p.score).length;
+  const seasons = D.backtest.seasons.map((q) => q.season);
+  const right = vm.n ? vm.disagree_model_right / vm.disagree_n : 0;
+  const nBack = D.record.picks.filter((p) => p.score && p.source === "backfill").length;
   return `<section class="section-head" style="margin-bottom:20px"><div><h2>Track record</h2>
-    <p>Every pick is frozen when it is published, before tipoff, and graded the next morning. The backtest shows how the same model did on last season without having seen it.</p></div></section>
+    <p>Every game since opening night of ${esc(D.meta.season)}, graded against the final score and the closing betting line. Picks published on the site are revisable until tipoff, then frozen. The ${nBack} games before the site launched${D.record.first_live ? ` (${dayLabel(D.record.first_live, { month: "short", day: "numeric" })})` : ""} are <b>backfilled</b>: predicted afterwards from pre-game data by a model trained only on earlier seasons. The backtest replays every season since ${esc(D.backtest.first)} the same way.</p></div></section>
   <section class="big-stats">
-    <div class="card big-stat"><span>Live record</span><b>${live.n ? `${live.correct}–${live.n - live.correct}` : "0–0"}</b><small>${pending} pick${pending === 1 ? "" : "s"} pending</small></div>
-    <div class="card big-stat"><span>Live accuracy</span><b ${live.n ? `data-count="${(live.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%"` : ""}>${live.n ? "0" : "—"}</b><small>${live.n ? `log loss ${live.log_loss}` : "starts tonight"}</small></div>
-    <div class="card big-stat"><span>${esc(bt.season)} backtest</span><b data-count="${(bt.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><small>${bt.correct} of ${bt.n} games</small></div>
-    <div class="card big-stat"><span>Vegas benchmark</span><b>67–69%</b><small>closing-line favorites</small></div>
+    <div class="card big-stat"><span>${esc(D.meta.season)} record</span><b>${sea.n ? `${sea.correct}–${sea.n - sea.correct}` : "0–0"}</b><small>${sea.n ? `${pct(sea.accuracy, 1)} · ` : ""}${live.n || 0} live, ${nBack} backfilled · ${pending} pending</small></div>
+    <div class="card big-stat"><span>Season vs market</span><b>${svm.n ? `${pct(svm.model.accuracy, 0)} / ${pct(svm.market.accuracy, 0)}` : "—"}</b><small>${svm.n ? `model / betting favorite, ${svm.n} games` : "needs graded games with a line"}</small></div>
+    <div class="card big-stat"><span>Backtest ${btSpan()}</span><b data-count="${(o.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><small>${o.correct.toLocaleString()} of ${o.n.toLocaleString()} games</small></div>
+    <div class="card big-stat"><span>Market, same games</span><b ${vm.n ? `data-count="${(vm.market.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%"` : ""}>${vm.n ? "0" : "—"}</b><small>${vm.n ? `model ${pct(vm.model.accuracy, 1)} on these ${vm.n.toLocaleString()}` : "no lines"}</small></div>
   </section>
-  <section class="two" style="margin-top:0">
+  ${vm.n ? `<section class="card panel vs-strip">
+    <div class="vs-head"><span class="mono muted">When the model and the market disagreed on the favorite</span><b>${vm.disagree_n.toLocaleString()} games</b></div>
+    <div class="vs-bar"><i style="background:var(--orange)" data-w="${pct(right, 1)}"></i><i style="background:var(--slate)" data-w="${pct(1 - right, 1)}"></i></div>
+    <div class="vs-labels mono"><span>model right ${pct(right, 1)}</span><span>market right ${pct(1 - right, 1)}</span></div>
+    <div class="mono muted">Log loss (lower is better): model ${vm.model.log_loss} · market ${vm.market.log_loss} · they pick the same favorite in ${pct(vm.agree, 0)} of games</div>
+  </section>` : ""}
+  <section class="card panel" style="margin-top:14px"><div class="panel-head"><h3>Model vs betting market, season by season</h3><span class="mono muted">walk-forward backtest</span></div>${seasonChart()}</section>
+  <section class="two" style="margin-top:14px">
     <div class="card panel"><div class="panel-head"><h3>When it says 70%, does it win 70%?</h3></div>${calibrationChart()}</div>
-    <div class="card panel"><div class="panel-head"><h3>Accuracy through ${esc(bt.season)}</h3><span class="mono muted">backtest</span></div>${rollingChart()}</div>
+    <div class="card panel"><div class="panel-head"><h3>Seasons at a glance</h3></div>
+      <div class="table-wrap"><table><thead><tr><th>Season</th><th class="r">Games</th><th class="r">Model</th><th class="r">Market</th><th class="r">Log loss</th></tr></thead><tbody>
+      ${D.backtest.seasons.slice().reverse().map((q) => `<tr><td class="mono">${esc(q.season)}</td><td class="r mono">${q.n}</td><td class="r mono"><b>${pct(q.accuracy, 1)}</b></td>
+        <td class="r mono">${q.vs_market.n ? `${pct(q.vs_market.market.accuracy, 1)} <span class="muted">(${q.vs_market.n})</span>` : "—"}</td><td class="r mono">${q.log_loss}</td></tr>`).join("")}</tbody></table></div></div>
   </section>
-  <section class="card" style="margin-top:14px"><div class="panel-head" style="padding:18px 18px 0"><h3>Every pick</h3></div>
-    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Game</th><th>Pick</th><th>Score</th><th class="r">Result</th></tr></thead>
-    <tbody>${D.record.picks.map(pickRow).join("") || `<tr><td colspan="5" class="empty">No picks yet.</td></tr>`}</tbody></table></div></section>`;
+  <section class="card panel" style="margin-top:14px"><div class="panel-head"><h3>Rolling accuracy</h3>
+    <div class="chips">${["all", ...seasons].map((k) => `<button class="chip ${(state.rollSeason || "all") === k ? "on" : ""}" data-roll="${k}">${k === "all" ? "All seasons" : k}</button>`).join("")}</div></div>
+    <div id="roll-wrap">${rollingChart()}</div></section>
+  <section class="card" style="margin-top:14px"><div class="panel-head" style="padding:18px 18px 0"><h3>Every pick this season</h3></div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Game</th><th>Pick</th><th>Market</th><th>Score</th><th class="r">Result</th></tr></thead>
+    <tbody>${D.record.picks.map(pickRow).join("") || `<tr><td colspan="6" class="empty">No picks yet.</td></tr>`}</tbody></table></div></section>`;
 }
 
 /* ---------------------------------------------------------------- how */
-
-function viewHow() {
-  return `<section class="hero" style="margin-bottom:0"><div><span class="pill"><span class="dot"></span>Methodology</span>
-    <h1 style="font-size:clamp(36px,5vw,56px)">Who's playing<br><em>matters most.</em></h1>
-    <p class="lede">Team ratings say how good a team has been. Tipoff also asks who will actually be on the floor tonight, and for how long.</p></div></section>
-  <section class="steps">
-    <div class="step s1"><span class="n">01</span><h3>Rate every player</h3><p>PIE, on-court net rating and Game Score per 36, computed from every box score and weighted by minutes and recency, pulled toward a newcomer's level until a player has a real sample.</p></div>
-    <div class="step s2"><span class="n">02</span><h3>Build tonight's lineup</h3><p>Take today's roster, drop players listed as out, count day-to-day players at half their minutes, and weight everyone by projected minutes.</p></div>
-    <div class="step s4"><span class="n">03</span><h3>Blend with team form</h3><p>Margin-adjusted Elo, recent offensive and defensive efficiency, four factors and rest feed a logistic regression trained on 19,000+ games.</p></div>
-  </section>
-  <div class="prose">
-    <h2>The daily cycle</h2>
-    <p>Every morning, after the last game of the night is final, a scheduled GitHub Actions job pulls the new box scores from ESPN and retrains on every completed game since 2011. It then fetches the latest rosters and injury report and publishes a probability for each game on the next slate. Picks are frozen at publication and graded the following morning.</p>
-    <h2>Reading a game</h2>
-    <p>The <b>tug-of-war bar</b> shows each team's win probability. Open a game for the <b>factor chart</b>, which starts at 50/50 and shows how home court, Elo, recent form, the available players and rest each move the line. These steps add up exactly to the final number. The <b>rotation</b> panel shows projected minutes; darker bars are better-rated players and hatched bars are players who are out or questionable.</p>
-    <h2>Backtest, last six seasons</h2>
-    <div class="card" style="margin-top:8px"><table><thead><tr><th>Model</th><th class="r">Accuracy</th><th class="r">Log loss</th></tr></thead><tbody>
-      <tr><td><b>Team + players (Tipoff)</b></td><td class="r mono">67.5%</td><td class="r mono">0.606</td></tr>
-      <tr><td>Team stats only</td><td class="r mono">65.3%</td><td class="r mono">0.624</td></tr>
-      <tr><td>Elo only</td><td class="r mono">64.2%</td><td class="r mono">0.638</td></tr>
-      <tr><td>Always pick the home team</td><td class="r mono">55.4%</td><td class="r mono">0.689</td></tr></tbody></table></div>
-    <h2>Limits</h2>
-    <p>Late scratches after publication, minutes restrictions and surprise rest days aren't captured. The backtest knew exactly who played in each past game, so live accuracy will run a little lower. This is a statistical model, not betting advice.</p>
-  </div>`;
-}
 
 /* ---------------------------------------------------------------- router */
 
 function render() {
   const [, route = "", arg] = location.hash.split("/");
   if (route === "game") { state.open = arg; }
-  const view = { "": viewSlate, game: viewSlate, rankings: viewRankings, players: viewPlayers, record: viewRecord, how: viewHow }[route] || viewSlate;
+  const view = { "": viewSlate, game: viewSlate, rankings: viewRankings, players: viewPlayers, record: viewRecord, how: viewMethod, lab: viewLab }[route] || viewSlate;
   const name = route === "game" ? "" : route;
   $$("nav a").forEach((a) => a.classList.toggle("on", a.dataset.nav === (name || "slate")));
   const app = $("#app");
@@ -613,6 +764,8 @@ function render() {
   animateIn(app);
   if (route === "rankings") bindEloChart();
   if (route === "record") bindRolling();
+  if (route === "how") renderMath(app);
+  if (route === "lab") mountLab();
   if (route === "game" && arg) requestAnimationFrame(() => $(`[data-game="${arg}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
@@ -646,7 +799,24 @@ document.addEventListener("click", (e) => {
   if (row) { state.hlTeam = row.dataset.team; eloHighlight(state.hlTeam, true); $("#elo")?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
   const ps = t.closest("[data-psort]");
   if (ps) { state.pSort = ps.dataset.psort; $$("[data-psort]").forEach((h) => h.classList.toggle("sorted", h.dataset.psort === state.pSort)); refreshPlayers(); return; }
-  if (t.id === "more") { state.pLimit += 60; refreshPlayers(); }
+  if (t.id === "more") { state.pLimit += 60; refreshPlayers(); return; }
+  const po = t.closest("[data-elo-po]");
+  if (po) {
+    state.eloPlayoffs = po.dataset.eloPo === "1";
+    $$("[data-elo-po]").forEach((b) => b.classList.toggle("on", b === po));
+    $("#elo-wrap").innerHTML = eloChart();
+    bindEloChart();
+    return;
+  }
+  const jump = t.closest("[data-jump]");
+  if (jump) { e.preventDefault(); document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+  const roll = t.closest("[data-roll]");
+  if (roll) {
+    state.rollSeason = roll.dataset.roll;
+    $$("[data-roll]").forEach((b) => b.classList.toggle("on", b.dataset.roll === state.rollSeason));
+    $("#roll-wrap").innerHTML = rollingChart();
+    bindRolling();
+  }
 });
 function refreshPlayers() { const tb = $("#ptable tbody"); tb.innerHTML = playerRows(); animateIn(tb); }
 document.addEventListener("input", (e) => {
@@ -681,13 +851,17 @@ function tickCountdown() {
 
 function ticker() {
   const items = D.slate.games.map((g) => `<span>${esc(g.away.abbr)} @ ${esc(g.home.abbr)} <b>${esc(g.pick)} ${pct(confidence(g))}</b></span>`);
-  items.push(`<span>${esc(D.backtest.season)} backtest <b>${pct(D.backtest.accuracy, 1)}</b></span>`);
+  items.push(`<span>Backtest ${btSpan()} <b>${pct(D.backtest.overall.accuracy, 1)}</b></span>`);
+  if (D.backtest.vs_market.n) items.push(`<span>Betting favorites, same games <b>${pct(D.backtest.vs_market.market.accuracy, 1)}</b></span>`);
+  const edges = D.slate.games.map((g) => ({ g, e: edge(g) })).filter((x) => x.e && x.e.pts >= 5);
+  for (const { g, e } of edges) items.push(`<span>${esc(g.away.abbr)} @ ${esc(g.home.abbr)} edge <b>${esc(e.team)} +${e.pts.toFixed(0)}</b> vs market</span>`);
   const lead = D.teams.teams[0];
   items.push(`<span>No. 1 power ranking <b>${esc(lead.abbr)}</b></span>`);
   $("#ticker").innerHTML = items.join("");
 }
 
-load().then(() => {
+load().then(async () => {
+  D.custom = await applyCustomToToday().catch(() => null);
   ticker();
   $("#foot-meta").textContent = `Updated ${updatedLabel()} · trained on ${D.meta.trained_games.toLocaleString()} games`;
   render();

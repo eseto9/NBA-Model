@@ -39,6 +39,7 @@ SEASON_TYPES = ("Regular Season", "PlayIn", "Playoffs")
 ELO_K, ELO_HCA, ELO_MEAN, ELO_CARRY = 20, 100, 1505, 0.75
 HALFLIFE = 10                # games, for exponentially weighted team form
 STATS = ["net", "ortg", "drtg", "efg", "opp_efg", "tov", "orb", "ftr", "win"]
+LAB_STATS = ["pace"]         # tracked for the Model Lab, not used by the default model
 
 
 def season_str(y):
@@ -92,11 +93,36 @@ def data_files(kind):
 
 
 def known_players():
-    """Each NBA player's latest appearance, for mapping ESPN athletes onto NBA ids."""
+    """Each NBA player's latest appearance, for mapping ESPN athletes onto NBA ids.
+    Recent draftees count as appearing on draft day, so rookies get their NBA ids."""
     cols = ["PLAYER_ID", "PLAYER_NAME", "GAME_DATE"]
     p = pd.concat([pd.read_csv(f, usecols=cols) for f in data_files("players")], ignore_index=True)
+    d = load_draft()
+    d = d[(d.SEASON >= current_season() - 1) & d.PLAYER_ID.notna()]
+    d = pd.DataFrame({"PLAYER_ID": d.PLAYER_ID.astype(int), "PLAYER_NAME": d.PLAYER_NAME, "GAME_DATE": d.SEASON.astype(str) + "-06-25"})
+    p = pd.concat([d, p], ignore_index=True)
     p["GAME_DATE"] = pd.to_datetime(p.GAME_DATE)
     return p.sort_values("GAME_DATE").drop_duplicates("PLAYER_ID", keep="last")
+
+
+def load_draft():
+    """Draft picks: stats.nba.com history plus newer classes from ESPN (no NBA ids)."""
+    d = pd.read_csv(HIST / "draft.csv.gz", usecols=["PERSON_ID", "PLAYER_NAME", "SEASON", "OVERALL_PICK"])
+    d.columns = ["PLAYER_ID", "PLAYER_NAME", "SEASON", "PICK"]
+    return pd.concat([d, *[pd.read_csv(f) for f in sorted(LIVE.glob("draft_*.csv"))]], ignore_index=True)
+
+
+def add_draft_bucket(df, draft=None):
+    """Draft range of each row's player, by NBA id, or by name for players known only to ESPN."""
+    draft = (load_draft() if draft is None else draft).sort_values("SEASON")
+    by_id = dict(zip(draft.PLAYER_ID.dropna().astype(int), draft.PICK[draft.PLAYER_ID.notna()]))
+    recent = draft[draft.SEASON >= 2015]
+    by_name = dict(zip(recent.PLAYER_NAME.map(players.norm_name), recent.PICK))
+    picks = df.PLAYER_ID.map(by_id)
+    espn_only = df.PLAYER_ID < 0
+    picks[espn_only] = df.PLAYER_NAME[espn_only].map(players.norm_name).map(by_name)
+    df["draft_bucket"] = picks.map(players.draft_bucket)
+    return df
 
 
 def team_maps():
@@ -106,6 +132,9 @@ def team_maps():
 
 def update():
     """Add the season in progress, day by day, from ESPN."""
+    season = current_season()
+    if load_draft().SEASON.max() < season and dt.date.today() > dt.date(season, 7, 1):
+        espn.draft(season).to_csv(LIVE / f"draft_{season}.csv", index=False)   # this year's class
     ids, names = team_maps()
     return espn.update(LIVE, current_season(), ids, names, known_players())
 
@@ -152,6 +181,7 @@ def team_box(tg):
         "win": (m.PTS > m.PTS_o).astype(float),
     })
     box["net"] = box.ortg - box.drtg
+    box["pace"] = poss.values
     return box
 
 
@@ -200,12 +230,12 @@ def add_form(games, box):
     long = pd.concat(sides).merge(box, on=["game_id", "team_id"], how="left")
     long = long.sort_values(["team_id", "date", "game_id"]).reset_index(drop=True)
     grp = long.groupby("team_id")
-    for s in STATS:
+    for s in STATS + LAB_STATS:
         # ewm carries the last value through unplayed (NaN) rows; shift makes it pre-game
         long[f"f_{s}"] = grp[s].transform(lambda x: x.ewm(halflife=HALFLIFE, ignore_na=True).mean().shift(1))
     long["rest"] = grp.date.diff().dt.days.clip(upper=5).fillna(5)
     long["gp"] = long.groupby(["team_id", "season"]).cumcount()
-    keep = ["game_id", "team_id", "rest", "gp"] + [f"f_{s}" for s in STATS]
+    keep = ["game_id", "team_id", "rest", "gp"] + [f"f_{s}" for s in STATS + LAB_STATS]
     for side, sfx in (("home", "_h"), ("away", "_a")):
         f = long[keep].rename(columns={c: c + sfx for c in keep if c not in ("game_id", "team_id")})
         games = games.merge(f.rename(columns={"team_id": f"{side}_id"}), on=["game_id", f"{side}_id"], how="left")
@@ -214,7 +244,8 @@ def add_form(games, box):
 
 def load_players():
     """Rated player-games plus each player's latest state and newcomer priors."""
-    return players.rate_players(players.load_player_games(data_files("players"), GAME_TYPES))
+    pg = players.load_player_games(data_files("players"), GAME_TYPES)
+    return players.rate_players(add_draft_bucket(pg))
 
 
 def add_lineups(games, lineups):
@@ -241,6 +272,14 @@ def build(extra_games=None, extra_lineups=None, rated=None):
 
 
 LINEUP_FEATURES = [f"d_lu_{m}" for m in players.METRICS] + ["d_lu_star", "d_lu_min"]
+
+
+def lab_features(g):
+    """Default features plus the optional ones the site's Model Lab can switch on."""
+    X = features(g)
+    for s in LAB_STATS:
+        X[f"d_{s}"] = (g[f"f_{s}_h"] - g[f"f_{s}_a"]).fillna(0)
+    return X
 
 
 def features(g):
@@ -336,7 +375,7 @@ def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     rated = rated or load_players()
     _, latest, priors = rated
     unplayed = sched[~sched.game_id.isin(load_team_games().GAME_ID)]
-    roster = espn.rosters(LIVE, team_ids, known_players())
+    roster = add_draft_bucket(espn.rosters(LIVE, team_ids, known_players()))
     injuries = players.fetch_injuries()
     roster, unmatched = players.availability(roster, injuries, force_out, force_in)
     lineups, roster = players.upcoming_lineups(unplayed, roster, latest, priors)

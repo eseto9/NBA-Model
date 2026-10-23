@@ -47,12 +47,12 @@ espn_id,player_id,name
 4683692,1641717,Cason Wallace
 4432823,1631119,Jaylin Williams
 4684208,1642964,Brooks Barnhizer
-5174983,-5174983,Aday Mara
+5174983,1643530,Aday Mara
 2991350,1627936,Alex Caruso
 3133626,1629026,Kenrich Williams
 4683778,1642272,Jared McCain
 4900671,1642349,Ajay Mitchell
-5241364,-5241364,Bennett Stirtz
+5241364,1642892,Bennett Stirtz
 5104157,1641705,Victor Wembanyama
 4066259,1628368,De'Aaron Fox
 4395630,1630170,Devin Vassell
@@ -63,10 +63,10 @@ espn_id,player_id,name
 4592479,1630577,Julian Champagnie
 4713010,1642357,David Jones Garcia
 5061568,1642868,Carter Bryant
-5105337,-5105337,Maliq Brown
+5105337,1643576,Maliq Brown
 3064560,1628436,Luke Kornet
-5105809,-5105809,Tarris Reed Jr.
-5107968,-5107968,Ja'Kobi Gillespie
+5105809,1643542,Tarris Reed Jr.
+5107968,1643551,Ja'Kobi Gillespie
 4431680,1630168,Onyeka Okongwu
 4701230,1630552,Jalen Johnson
 2490149,203468,CJ McCollum
@@ -75,7 +75,7 @@ espn_id,player_id,name
 3146557,1629111,Jock Landale
 4397020,1629652,Luguentz Dort
 4397183,1630598,Aaron Wiggins
-5149077,-5149077,Kingston Flemings
+5149077,1643412,Kingston Flemings
 4432573,1631094,Paolo Banchero
 4566434,1630532,Franz Wagner
 4277847,1628976,Wendell Carter Jr.
@@ -95,7 +95,7 @@ espn_id,player_id,name
 4277922,1630579,Jericho Sims
 5105623,1642276,Kel'el Ware
 4397475,1631260,AJ Green
-5082206,-5082206,Brayden Burries
+5082206,1643415,Brayden Burries
 5214640,1642857,Kasparas Jakucionis
 6583,203076,Anthony Davis
 5174563,1642273,Kyshawn George
@@ -114,7 +114,7 @@ espn_id,player_id,name
 4594268,1630162,Anthony Edwards
 3136196,1626168,Trey Lyles
 4895758,1642262,Cody Williams
-5061585,-5061585,Isaiah Evans
+5061585,1642912,Isaiah Evans
 5279133,1642866,Joan Beringer
 4397002,1630245,Ayo Dosunmu
 4432247,1641740,Jaylen Clark
@@ -132,7 +132,7 @@ espn_id,player_id,name
 4278076,1630208,Nick Richards
 2528210,203501,Tim Hardaway Jr.
 4601025,1641796,Pelle Larsson
-5107157,-5107157,Ryan Conwell
+5107157,1643553,Ryan Conwell
 4433249,1631217,Moussa Diabate
 4433287,1641706,Brandon Miller
 4396971,1629675,Naz Reid
@@ -141,7 +141,7 @@ espn_id,player_id,name
 2583632,1626220,Royce O'Neale
 4576060,1641750,Ryan Kalkbrenner
 3135045,1628960,Grayson Allen
-5060701,-5060701,Christian Anderson
+5060701,1643515,Christian Anderson
 5239590,1642862,Liam McNeeley
 3064514,203944,Julius Randle
 4278104,1629008,Michael Porter Jr.
@@ -151,11 +151,11 @@ espn_id,player_id,name
 4712896,1641730,Noah Clowney
 5174655,1643052,Chaney Johnson
 3150844,1629021,Moritz Wagner
-5101761,-5101761,Mikel Brown Jr.
+5101761,1643414,Mikel Brown Jr.
 5279130,1642849,Nolan Traore
 4397189,1630188,Jalen Smith
 4711294,1641824,Matas Buzelis
-5095151,-5095151,Caleb Wilson
+5095151,1643410,Caleb Wilson
 2595516,1626181,Norman Powell
 4871145,1630581,Josh Giddey
 4066650,1628380,Zach Collins
@@ -175,16 +175,16 @@ espn_id,player_id,name
 4431684,1631218,Trayce Jackson-Davis
 4431893,1642419,Jamison Battle
 5093267,1642867,Collin Murray-Boyles
-5149115,-5149115,Allen Graves
+5149115,1643512,Allen Graves
 4432241,1642347,Jamal Shead
-4432737,-4432737,Jaden Bradley
+4432737,1643558,Jaden Bradley
 4684272,1642266,Ja'Kobe Walter
 4702656,1642918,Alijah Martin
 4066336,1628374,Lauri Markkanen
 4277961,1628991,Jaren Jackson Jr.
 4397077,1629637,Jaxson Hayes
 4433627,1641718,Keyonte George
-5041955,-5041955,Darryn Peterson
+5041955,1643408,Darryn Peterson
 4684793,1642271,Kyle Filipowski
 5105839,1641729,Brice Sensabaugh
 3133602,1629004,Svi Mykhailiuk
@@ -192,7 +192,7 @@ espn_id,player_id,name
 4683766,1642268,Isaiah Collier
 4873138,1642846,Ace Bailey
 4903027,1642907,Cedric Coward
-5041935,-5041935,Cameron Boozer
+5041935,1643409,Cameron Boozer
 5112087,1642377,Jaylen Wells
 4600663,1641744,Zach Edey
 4065733,1629660,Ty Jerome
@@ -227,9 +227,9 @@ espn_id,player_id,name
 6442,202681,Kyrie Irving
 4432582,1631108,Max Christie
 4278594,1630230,Naji Marshall
-4873153,-4873153,Morez Johnson Jr.
+4873153,1643516,Morez Johnson Jr.
 5211175,1642258,Zaccharie Risacher
-5279129,-5279129,Sergio de Larrea
+5279129,1643547,Sergio de Larrea
 4701208,1630619,Moussa Cisse
 4432107,1631204,Marcus Sasser
 3202,201142,Kevin Durant
@@ -244,10 +244,10 @@ espn_id,player_id,name
 2990992,203935,Marcus Smart
 3037789,203992,Bogdan Bogdanovic
 4711272,1642263,Reed Sheppard
-5105837,-5105837,Bruce Thornton
+5105837,1643570,Bruce Thornton
 6589,203110,Draymond Green
 4997536,1630611,Gui Santos
-5175737,-5175737,Yaxel Lendeborg
+5175737,1642865,Yaxel Lendeborg
 3975,201939,Stephen Curry
 4066436,1629001,De'Anthony Melton
 2990969,1627777,Georges Niang
@@ -277,7 +277,7 @@ espn_id,player_id,name
 4437244,1630224,Jalen Green
 4601023,1642345,Oso Ighodaro
 4888725,1642346,Ryan Dunn
-5041953,-5041953,Koa Peat
+5041953,1643520,Koa Peat
 5105977,1642853,Rasheer Fleming
 4066268,1641871,Duop Reath
 4278402,1630692,Jordan Goodwin
@@ -301,26 +301,26 @@ espn_id,player_id,name
 4065732,1629631,De'Andre Hunter
 4594327,1631099,Keegan Murray
 3064440,203897,Zach LaVine
-5142620,-5142620,Darius Acuff Jr.
+5142620,1643411,Darius Acuff Jr.
 4431679,1630173,Precious Achiuwa
-4917149,-4917149,Alex Karaban
+4917149,1642284,Alex Karaban
 5107897,1642367,Jonathan Mogbo
 4279318,1631342,Daeqwon Plowden
 4702384,1642363,Nique Clifford
-5106058,-5106058,Emanuel Sharp
+5106058,1643567,Emanuel Sharp
 3936099,1627884,Derrick Jones Jr.
 4066648,1629060,Rui Hachimura
 4432170,1630543,Isaiah Jackson
 2991139,1627739,Kris Dunn
 4396907,1629636,Darius Garland
-5075626,-5075626,Baba Miller
-5105832,-5105832,Nick Martinelli
+5075626,1642394,Baba Miller
+5105832,1643568,Nick Martinelli
 3448,201572,Brook Lopez
 4398390,1629618,Jalen Pickett
 4702352,1642920,Kobe Sanders
 4845363,1642353,Cam Christie
 5106258,1641711,Gradey Dick
-5254165,-5254165,Keaton Wagler
+5254165,1643413,Keaton Wagler
 4066328,1628386,Jarrett Allen
 4432158,1630596,Evan Mobley
 3992,201935,James Harden
@@ -339,28 +339,28 @@ espn_id,player_id,name
 4065813,-4065813,Alpha Diallo
 4277848,1628963,Marvin Bagley III
 4433607,1641747,DaRon Holmes II
-4565698,-4565698,Bryce Hopkins
-4698719,-4698719,Trevon Brazile
+4565698,1643624,Bryce Hopkins
+4698719,1642350,Trevon Brazile
 3978,201942,DeMar DeRozan
 3135046,1626145,Tyus Jones
 4433629,1642948,Ryan Nembhard
 4431941,1642484,RayJ Dennis
-5106262,-5106262,Zuby Ejiofor
+5106262,1643544,Zuby Ejiofor
 2578185,1627827,Dorian Finney-Smith
 4585618,1642933,Keshon Gilbert
 4712863,1631243,Mouhamed Gueye
 4280151,1630557,Corey Kispert
 4873201,1642854,Asa Newell
-5105571,-5105571,Henri Veesaar
+5105571,1643539,Henri Veesaar
 4431714,1630592,Jalen Wilson
 4433188,1642269,Devin Carter
-5142621,-5142621,Chris Cenac Jr.
+5142621,1643416,Chris Cenac Jr.
 3195,201144,Mike Conley
 4397251,1631199,Ron Harper Jr.
-5106283,-5106283,Dillon Mitchell
+5106283,1641759,Dillon Mitchell
 4702745,1642873,Amari Williams
-5105626,-5105626,Tyler Bilodeau
-4870564,-4870564,Joshua Jefferson
+5105626,1643548,Tyler Bilodeau
+4870564,1643538,Joshua Jefferson
 3907823,1629611,Terance Mann
 4687718,1631169,Josh Minott
 4702670,1641761,Grant Nelson
@@ -371,22 +371,22 @@ espn_id,player_id,name
 4701225,1641790,PJ Hall
 5061575,1642851,Kon Knueppel
 5211176,1642275,Tidjane Salaun
-5281370,-5281370,Hannes Steinbach
+5281370,1643419,Hannes Steinbach
 4395651,1629632,Coby White
 4066218,1629684,Grant Williams
 4278067,1629651,Nic Claxton
 4683750,1641722,Jordan Hawkins
-4848625,-4848625,Dailyn Swain
+4848625,1643517,Dailyn Swain
 4431687,1630172,Patrick Williams
 3934723,1628418,Thomas Bryant
 4431734,1642400,Tristan Enaruna
 5177362,1642434,Riley Minix
-5041951,-5041951,Meleek Thomas
+5041951,1643509,Meleek Thomas
 4593125,1630583,Santi Aldama
 5148538,-5148538,Tarik Biberovic
 4896372,1642383,Walter Clayton Jr.
 5105806,1641724,Jett Howard
-5106040,-5106040,Tobi Lawal
+5106040,1643588,Tobi Lawal
 4683688,1641726,Dereck Lively II
 3138160,1628997,Caleb Martin
 4592427,1642461,Spencer Jones
@@ -396,8 +396,8 @@ espn_id,player_id,name
 4397449,1641989,Elijah Harkless
 5107818,1642403,Isaac Jones
 4700852,1642404,Chaz Lanier
-5258459,-5258459,Ebuka Okorie
-5037878,-5037878,Ugonna Onyenso
+5258459,1643536,Ebuka Okorie
+5037878,1642391,Ugonna Onyenso
 2990962,1627752,Taurean Prince
 4397882,1642449,Tolu Smith
 4397886,1629646,Charles Bassey
@@ -415,13 +415,13 @@ espn_id,player_id,name
 2530530,204456,T.J. McConnell
 4396909,1630174,Aaron Nesmith
 4398207,1641771,Jalen Slawson
-5105854,-5105854,Braden Smith
+5105854,1643552,Braden Smith
 6580,203078,Bradley Beal
 3913176,1627742,Brandon Ingram
 4396818,1641757,Jordan Miller
 5108024,1642949,Yanic Konan Niederhauser
 4065778,1629622,Max Strus
-5113969,-5113969,Cameron Carr
+5113969,1643418,Cameron Carr
 4433599,-4433599,Arthur Kaluma
 5114350,-5114350,AK Okereke
 4277811,1629012,Collin Sexton
@@ -429,7 +429,7 @@ espn_id,player_id,name
 4278077,1629020,Jarred Vanderbilt
 5105817,-5105817,Carson Cooper
 4684806,1641707,Taylor Hendricks
-5231919,-5231919,Karim Lopez
+5231919,1643510,Karim Lopez
 4683934,1642942,Jahmai Mashack
 4594326,1631200,Kris Murray
 4595400,1641765,Olivier-Maxence Prosper
@@ -439,10 +439,10 @@ espn_id,player_id,name
 4700818,1642884,Vladislav Goldin
 4431786,1642352,Keshad Johnson
 4066993,1630696,Dru Smith
-5164559,-5164559,Nate Ament
+5164559,1643417,Nate Ament
 4697268,1642880,Kam Jones
 2991043,1627747,Caris LeVert
-5214989,-5214989,Bogoljub Markovic
+5214989,1642881,Bogoljub Markovic
 4397233,1631250,Pete Nance
 4397114,1642504,Cormac Ryan
 4277843,1629018,Gary Trent Jr.
@@ -454,7 +454,7 @@ espn_id,player_id,name
 3442,201599,DeAndre Jordan
 4997538,1631255,Karlo Matkovic
 4576086,1631121,Bryce McGowens
-4703115,-4703115,Jaron Pierre Jr.
+4703115,1643555,Jaron Pierre Jr.
 4683742,1642882,Julian Reese
 4431675,1630570,Trendon Watford
 4683730,-4683730,Jaden Akins
@@ -463,25 +463,25 @@ espn_id,player_id,name
 4897943,1642261,Dalton Knecht
 4433225,1642278,Tyler Kolek
 4411057,1641755,Kevin McCullar Jr.
-4838721,-4838721,Tyler Nickel
+4838721,1643589,Tyler Nickel
 4432808,1630164,James Wiseman
 5105800,-5105800,Josh Dix
-5106270,-5106270,Otega Oweh
-5061603,-5061603,Thomas Sorber
+5106270,1642923,Otega Oweh
+5061603,1642850,Thomas Sorber
 5159925,1642260,Nikola Topic
 4712849,1641710,Anthony Black
 3133635,1628975,Jevon Carter
 4397204,1630658,Colin Castleton
 4065654,1628371,Jonathan Isaac
 4593034,1631457,Alex Morales
-5107251,-5107251,Izaiyah Nelson
+5107251,1643593,Izaiyah Nelson
 5214637,1642869,Noah Penda
 4870562,1631230,Dominick Barlow
 4711297,1642348,Justin Edwards
 3904625,-3904625,Tacko Fall
 4871141,1630574,Ariel Hukporti
 4433144,1631126,Caleb Love
-4873090,-4873090,Labaron Philon Jr.
+4873090,1642889,Labaron Philon Jr.
 5099752,1641712,Rayan Rupert
 3912848,1629731,Dean Wade
 3913174,1628379,Luke Kennard
@@ -498,7 +498,7 @@ espn_id,player_id,name
 3907387,1627732,Ben Simmons
 6440,202699,Tobias Harris
 3134916,1629162,Jordan McLaughlin
-5101845,-5101845,Jayden Quaintance
+5101845,1643519,Jayden Quaintance
 4432586,-4432586,Nate Bittle
 4397784,1641869,Malachi Smith
 4433268,1641725,Trey Alexander
@@ -509,10 +509,10 @@ espn_id,player_id,name
 4433618,1631127,Harrison Ingram
 3102530,203994,Jusuf Nurkic
 4432187,1641736,Reece Beekman
-5142718,-5142718,AJ Dybantsa
+5142718,1643407,AJ Dybantsa
 2581184,1630264,Anthony Gill
 4432819,1630544,Tre Mann
-5105841,-5105841,Felix Okpara
+5105841,1643590,Felix Okpara
 5144126,1642860,Will Riley
 4997537,1641774,Tristan Vukcevic
 4606840,1642364,Jamir Watkins

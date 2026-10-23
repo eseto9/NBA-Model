@@ -272,3 +272,83 @@ td.r, th.r { text-align: right; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .ticker-track { animation: none; padding-left: 16px; }
 }
+
+/* betting market */
+.tug-wrap { position: relative; }
+.tug-mkt { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--card); cursor: help; transition: left 1s; }
+.mkt-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 12px var(--mono); margin-top: 6px; }
+.mkt-line b { font-weight: 500; }
+.mkt-dot { width: 4px; height: 12px; border-radius: 2px; background: var(--ink); }
+.tag.edge { background: transparent; border: 1px solid var(--orange); color: var(--ink); }
+.mkt-table td, .mkt-table th { padding: 6px 8px; font-size: 13px; }
+.mkt-table .badge { width: 24px; height: 24px; font-size: 9px; }
+.vs-strip { margin-top: 14px; display: grid; gap: 10px; }
+.vs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.vs-head b { font: 700 22px var(--display); }
+.vs-bar { display: flex; gap: 2px; height: 16px; border-radius: 8px; overflow: hidden; background: var(--card-2); }
+.vs-bar i { display: block; height: 100%; width: 0; transition: width 1.2s cubic-bezier(.2, .8, .2, 1); }
+.vs-labels { display: flex; justify-content: space-between; font-size: 12px; }
+.growy { transform-box: fill-box; transform-origin: center bottom; animation: growy .8s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes growy { from { transform: scaleY(0); } }
+.lock-ev { margin-top: 10px; font: 13px var(--mono); }
+.lock-ev b { color: var(--orange); font: 700 20px var(--display); margin-right: 4px; }
+.tag.scratch { background: var(--bad); color: #fff; font-size: 10px; padding: 1px 5px; }
+.out.manual { border-style: solid; border-color: var(--bad); }
+.scratch-link { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; margin-left: 6px; }
+.scratch-link:hover { color: var(--orange); }
+
+/* methodology */
+.toc { padding: 14px; display: grid; gap: 2px; align-self: start; }
+.toc a { padding: 6px 10px; border-radius: 8px; font-size: 14px; display: flex; gap: 10px; }
+.toc a:hover { background: var(--card-2); }
+.method { max-width: 820px; }
+.method h2 { scroll-margin-top: 80px; }
+.method h3 { color: var(--ink); font: 600 16px var(--font); margin: 22px 0 6px; }
+.method .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.method .katex { font-size: 1.05em; color: var(--ink); }
+.method li { margin: 6px 0; }
+.method table td { font-size: 13.5px; vertical-align: top; }
+.method .chart { margin: 8px 0 4px; }
+
+/* model lab */
+.lab { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+.lab-controls { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow-y: auto; }
+.lab-controls h3 { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--card-2); padding: 4px; border-radius: 10px; }
+.seg button { border: 0; background: transparent; padding: 7px 4px; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+.seg button.on { background: var(--card); box-shadow: var(--shadow); font-weight: 600; }
+.lab-slider { display: grid; gap: 4px; margin-top: 12px; font-size: 13px; }
+.lab-slider span { display: flex; justify-content: space-between; }
+.lab-slider input { accent-color: var(--orange); width: 100%; }
+.lab-hint { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+.lab-groups { display: grid; gap: 2px; }
+.lab-groups.disabled { opacity: .45; }
+.lab-check { display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 7px 6px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.lab-check:hover { background: var(--card-2); }
+.lab-check input { accent-color: var(--orange); margin-top: 3px; }
+.lab-check small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 2px; }
+.lab-check.off { cursor: not-allowed; opacity: .6; }
+.lab-actions { display: flex; gap: 8px; margin: 16px 0 8px; }
+.btn { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: 14px; }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600; }
+.btn:hover { border-color: var(--ink-2); }
+.use-today { border-top: 1px solid var(--line-2); margin-top: 8px; padding-top: 12px; border-radius: 0; }
+.lab-summary .lab-sum-body { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+.lab-summary .lab-sum-body > div { display: grid; gap: 4px; }
+.lab-big { font: 800 34px/1 var(--display); }
+.lab-summary .mono { font-size: 12px; opacity: .8; }
+.lab-summary .up { color: #7fd47a; opacity: 1; }
+.lab-summary .down { color: #f08a83; opacity: 1; }
+.lab-progress { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .1); overflow: hidden; margin: 18px 0 8px; }
+.lab-progress i { display: block; height: 100%; background: var(--orange); transition: width .3s; }
+.lab-bars { display: grid; gap: 6px; }
+.lab-bar { display: grid; grid-template-columns: 170px 1fr 56px; gap: 8px; align-items: center; font-size: 12.5px; }
+.lab-bar span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bar .track { position: relative; height: 8px; background: var(--card-2); border-radius: 4px; overflow: hidden; }
+.lab-bar .track.div::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line); }
+.lab-bar .track i { position: absolute; top: 0; bottom: 0; width: 0; border-radius: 4px; transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+.lab-bar .mono { text-align: right; font-size: 11.5px; }
+.lab-results { min-width: 0; }
+.custom-banner { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin: -20px 0 24px; border-color: var(--orange); font-size: 14px; }
+.custom-banner a { color: var(--orange); }
+@media (max-width: 860px) { .lab { grid-template-columns: 1fr; } .lab-controls { position: static; max-height: none; } }

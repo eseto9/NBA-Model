@@ -7,6 +7,7 @@ onto NBA ids so ratings carry over:
 
   data/espn/<season>/<date>.games.csv     one row per team per game
   data/espn/<season>/<date>.players.csv   one row per player per game
+  data/espn/<season>/<date>.odds.csv      betting lines ESPN shows for each game (pickcenter)
   data/espn/ids.csv                       ESPN athlete id -> NBA player id
 """
 import datetime as dt
@@ -103,12 +104,17 @@ def split(v):
 
 
 def box_score(ev, team_ids, team_names, ids):
-    """(team rows, player rows) for one final game, in NBA log layout."""
+    """(team rows, player rows, betting lines) for one final game, in NBA log layout."""
     gid, day = game_id(ev), et_day(ev["date"])
     season_start = ev["season"]["year"] - 1
     comp = ev["competitions"][0]
     sides = {c["homeAway"]: c for c in comp["competitors"]}
     summary = get("summary", event=ev["id"])
+    lines = [{"date": f"{day:%Y-%m-%d}", "home": nba_abbr(sides["home"]["team"]["abbreviation"]),
+                        "away": nba_abbr(sides["away"]["team"]["abbreviation"]), "provider": p.get("provider", {}).get("name"),
+                        "home_ml": p["homeTeamOdds"]["moneyLine"], "away_ml": p["awayTeamOdds"]["moneyLine"]}
+                       for p in summary.get("pickcenter") or []
+                       if p.get("homeTeamOdds", {}).get("moneyLine") is not None and p.get("awayTeamOdds", {}).get("moneyLine") is not None]
     prows, teams = [], {}
     for block in summary["boxscore"]["players"]:
         abbr = nba_abbr(block["team"]["abbreviation"])
@@ -155,7 +161,7 @@ def box_score(ev, team_ids, team_names, ids):
             **{k: int(mine[k].sum()) for k in ("FGM", "FGA", "FG3M", "FTM", "FTA", "OREB", "DREB")},
             "TOV": teams.get(abbr, {}).get("tov") or int(mine.TOV.sum()),
         })
-    return pd.DataFrame(trows, columns=TEAM_COLS), p.reindex(columns=PLAYER_COLS + ["FG3M"])
+    return pd.DataFrame(trows, columns=TEAM_COLS), p.reindex(columns=PLAYER_COLS + ["FG3M"]), lines
 
 
 def update(live_dir, season, team_ids, team_names, known_players, through=None):
@@ -173,11 +179,14 @@ def update(live_dir, season, team_ids, team_names, known_players, through=None):
             events = [e for e in scoreboard(day) if game_id(e)]
             if all(e["status"]["type"]["name"] in FINAL_STATES for e in events):
                 tframes, pframes = [pd.DataFrame(columns=TEAM_COLS)], [pd.DataFrame(columns=PLAYER_COLS + ["FG3M"])]
+                lines = []
                 for e in events:
                     if e["status"]["type"]["name"] == "STATUS_FINAL":
-                        t, p = box_score(e, team_ids, team_names, ids)
+                        t, p, game_lines = box_score(e, team_ids, team_names, ids)
                         tframes.append(t)
                         pframes.append(p)
+                        lines += game_lines
+                pd.DataFrame(lines, columns=["date", "home", "away", "provider", "home_ml", "away_ml"]).to_csv(sdir / f"{day}.odds.csv", index=False)
                 pd.concat(pframes).to_csv(ppath, index=False)
                 pd.concat(tframes).to_csv(gpath, index=False)   # written last: marks the day complete
                 ids.save()
@@ -188,6 +197,20 @@ def update(live_dir, season, team_ids, team_names, known_players, through=None):
                 print(f"{day}: games not final yet, will retry")
         day += dt.timedelta(days=1)
     return pending
+
+
+def draft(year):
+    """A draft class from ESPN: DataFrame(PLAYER_ID (unknown), PLAYER_NAME, SEASON, PICK)."""
+    core = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba"
+    rows = []
+    for rnd in requests.get(f"{core}/seasons/{year}/draft/rounds", timeout=30).json().get("items", []):
+        for p in rnd.get("picks", []):
+            ref = p.get("athlete", {}).get("$ref")
+            if not ref:
+                continue
+            name = requests.get(ref.replace("http://", "https://"), timeout=30).json().get("displayName")
+            rows.append({"PLAYER_ID": None, "PLAYER_NAME": name, "SEASON": year, "PICK": p["overall"]})
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------- upcoming games

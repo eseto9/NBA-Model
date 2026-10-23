@@ -17,7 +17,6 @@ import requests
 PLAYER_HALFLIFE = 25     # player games
 MIN_HALFLIFE = 6         # player games, for expected minutes
 PRIOR_MIN = 250          # pseudo-minutes of newcomer-level play blended into each rating
-NEW_PLAYER_MIN = 8.0     # expected minutes for a player with no NBA history
 LINEUP_SIZE = 10         # top players by expected minutes that make up the lineup
 DTD_WEIGHT = 0.5         # day-to-day players count for half their expected minutes
 METRICS = ["pie", "net", "gmsc"]
@@ -75,23 +74,46 @@ def add_metrics(pg):
 
 # ---------------------------------------------------------------- ratings
 
+DRAFT_BUCKETS = [(1, 3, "1-3"), (4, 10, "4-10"), (11, 20, "11-20"), (21, 30, "21-30"), (31, 45, "31-45"), (46, 60, "46-60")]
+
+
+def draft_bucket(pick):
+    if pick is None or pd.isna(pick):
+        return "undrafted"
+    return next((b for lo, hi, b in DRAFT_BUCKETS if lo <= pick <= hi), "undrafted")
+
+
+def newcomer_priors(pg):
+    """Where newcomers start, by draft range: minute-weighted metrics and average minutes
+    over the first 20 games of careers that began inside the data (rookies, not veterans
+    who were already in the league when the data starts)."""
+    first_season = pg.GAME_DATE.min() + pd.Timedelta(days=300)
+    debut = pg.groupby("PLAYER_ID").GAME_DATE.transform("min")
+    first = (pg.groupby("PLAYER_ID").cumcount() < 20) & (debut > first_season)
+    priors = {}
+    for b, d in pg[first].groupby("draft_bucket"):
+        priors[b] = {m: np.average(d[m].fillna(d[m].mean()), weights=d.MIN) for m in METRICS}
+        priors[b]["min"] = d.MIN.mean()
+        priors[b]["n"] = d.PLAYER_ID.nunique()
+    return priors
+
+
 def rate_players(pg):
     """Adds pre-game ratings r_* and expected minutes exp_min to each player-game.
-    Returns (pg, latest, priors): latest is each player's state after his last game."""
+    Returns (pg, latest, priors): latest is each player's state after his last game, and
+    priors[bucket] the starting level for a newcomer from that draft range."""
     alpha = 1 - 0.5 ** (1 / PLAYER_HALFLIFE)
     by = pg.PLAYER_ID
     den = pg.MIN.groupby(by).transform(lambda x: x.ewm(alpha=alpha).sum())
-    first = pg.groupby("PLAYER_ID").cumcount() < 20
-    priors = {}
+    priors = newcomer_priors(pg)
+    bucket = pg.draft_bucket
     for m in METRICS:
-        ok = first & pg[m].notna()
-        # newcomer level: minute-weighted average over players' first 20 career games
-        priors[m] = np.average(pg.loc[ok, m], weights=pg.loc[ok, "MIN"])
-        num = (pg.MIN * pg[m].fillna(priors[m])).groupby(by).transform(lambda x: x.ewm(alpha=alpha).sum())
-        pg[f"post_{m}"] = (num + PRIOR_MIN * priors[m]) / (den + PRIOR_MIN)
-        pg[f"r_{m}"] = pg[f"post_{m}"].groupby(by).shift(1).fillna(priors[m])
+        prior = bucket.map({b: p[m] for b, p in priors.items()})
+        num = (pg.MIN * pg[m].fillna(prior)).groupby(by).transform(lambda x: x.ewm(alpha=alpha).sum())
+        pg[f"post_{m}"] = (num + PRIOR_MIN * prior) / (den + PRIOR_MIN)
+        pg[f"r_{m}"] = pg[f"post_{m}"].groupby(by).shift(1).fillna(prior)
     pg["post_min"] = pg.MIN.groupby(by).transform(lambda x: x.ewm(halflife=MIN_HALFLIFE).mean())
-    pg["exp_min"] = pg.post_min.groupby(by).shift(1).fillna(NEW_PLAYER_MIN)
+    pg["exp_min"] = pg.post_min.groupby(by).shift(1).fillna(bucket.map({b: p["min"] for b, p in priors.items()}))
 
     post = ["post_min"] + [f"post_{m}" for m in METRICS]
     latest = pg.groupby("PLAYER_ID").tail(1)[["PLAYER_ID", "PLAYER_NAME", "GAME_DATE"] + post]
@@ -147,18 +169,20 @@ def availability(roster, injuries, force_out=(), force_in=()):
     keys = roster.PLAYER_NAME.map(norm_name)
     unmatched = set(status) - set(keys)
     st = keys.map(status).fillna("Healthy")
-    st[keys.isin({norm_name(n) for n in force_out})] = "Out"
-    st[keys.isin({norm_name(n) for n in force_in})] = "Healthy"
+    manual_out, manual_in = keys.isin({norm_name(n) for n in force_out}), keys.isin({norm_name(n) for n in force_in})
+    st[manual_out] = "Out"
+    st[manual_in] = "Healthy"
     avail = st.map({"Out": 0.0, "Day-To-Day": DTD_WEIGHT}).fillna(1.0)
-    return roster.assign(status=st.values, avail=avail.values), unmatched
+    return roster.assign(status=st.values, avail=avail.values, manual=(manual_out | manual_in).values), unmatched
 
 
 def upcoming_lineups(games, roster, latest, priors):
     """Lineup strength for unplayed games from roster availability and latest ratings."""
     r = roster.merge(latest.drop(columns=["PLAYER_NAME"]), on="PLAYER_ID", how="left")
-    r["exp_min"] = r.exp_min.fillna(NEW_PLAYER_MIN)
+    # players with no NBA games yet start at their draft range's level (roster carries draft_bucket)
+    r["exp_min"] = r.exp_min.fillna(r.draft_bucket.map({b: p["min"] for b, p in priors.items()}))
     for m in METRICS:
-        r[f"r_{m}"] = r[f"r_{m}"].fillna(priors[m])
+        r[f"r_{m}"] = r[f"r_{m}"].fillna(r.draft_bucket.map({b: p[m] for b, p in priors.items()}))
     sides = pd.concat([games[["game_id", f"{s}_id"]].rename(columns={f"{s}_id": "team_id"}) for s in ("home", "away")])
     rows = sides.merge(r, on="team_id")
     return lineup_strength(rows), r

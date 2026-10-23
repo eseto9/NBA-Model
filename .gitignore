@@ -1,3 +1,4 @@
 models/
 predictions/
 __pycache__/
+data/nba/odds_hist/

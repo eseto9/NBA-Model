@@ -1,0 +1,41 @@
+name: Odds update
+on:
+  schedule:                 # hourly, 14:05-03:05 UTC (10 AM-11 PM EDT): 14 runs/day. With the
+    - cron: "5 14-23 * * *" # morning run that's 15 credits/day, inside the free plan's 500/month;
+    - cron: "5 0-3 * * *"   # odds.py also skips calls when no game is near or credits run short
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: publish
+  cancel-in-progress: false
+jobs:
+  odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests pandas
+      - run: python odds.py
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      - id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add log/odds.csv log/odds_state.json site/data/odds.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "Odds update $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase origin main && git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+  deploy:
+    needs: odds
+    if: needs.odds.outputs.changed == 'true'
+    uses: ./.github/workflows/pages.yml

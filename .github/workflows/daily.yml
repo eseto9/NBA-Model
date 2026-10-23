@@ -11,7 +11,7 @@ permissions:
   pages: write
   id-token: write
 concurrency:
-  group: daily
+  group: publish
   cancel-in-progress: false
 jobs:
   update:
@@ -29,6 +29,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python daily.py
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
   deploy:
     needs: update
     uses: ./.github/workflows/pages.yml
