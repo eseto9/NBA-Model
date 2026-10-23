@@ -28,6 +28,7 @@ from sklearn.preprocessing import StandardScaler
 
 import espn
 import players
+import situational
 
 ROOT = Path(__file__).parent
 DATA, MODELS, PREDS = ROOT / "data", ROOT / "models", ROOT / "predictions"
@@ -268,10 +269,11 @@ def build(extra_games=None, extra_lineups=None, rated=None):
     lineups = players.history_lineups(pg)
     if extra_lineups is not None:
         lineups = pd.concat([lineups, extra_lineups[~extra_lineups.game_id.isin(lineups.game_id)]])
-    return add_lineups(games, lineups)
+    games = add_lineups(games, lineups)
+    return situational.add_massey(situational.add_schedule(games))
 
 
-LINEUP_FEATURES = [f"d_lu_{m}" for m in players.METRICS] + ["d_lu_star", "d_lu_min"]
+LINEUP_FEATURES = ["d_lu_pie", "d_lu_net", "d_lu_gmsc", "d_lu_star", "d_lu_min"]
 
 
 def lab_features(g):
@@ -279,6 +281,9 @@ def lab_features(g):
     X = features(g)
     for s in LAB_STATS:
         X[f"d_{s}"] = (g[f"f_{s}_h"] - g[f"f_{s}_a"]).fillna(0)
+    X["d_lu_tpi"] = (g.lu_tpi_h - g.lu_tpi_a).fillna(0)
+    for c in situational.COLUMNS:
+        X[c] = g[c].fillna(0) if c in g else 0.0
     return X
 
 

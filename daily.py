@@ -39,12 +39,12 @@ def main(push=True):
             time.sleep(WAIT_MIN * 60)
     else:
         log("some games still not final; publishing anyway")
-    # morning odds snapshot for the slate just published (skips itself when over budget)
+    # morning odds snapshot for the slate just published
     o = subprocess.run([sys.executable, "odds.py"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     log(f"odds: {(o.stdout + o.stderr).strip().splitlines()[-1:] or ''}")
     if not push:
         return 0
-    git("add", "site/data", "data/espn", "log/predictions.csv", "log/rankings.csv", "log/odds.csv", "log/odds_state.json")
+    git("add", "site/data", "data/espn", "log/predictions.csv", "log/rankings.csv", "log/odds.csv")
     if git("diff", "--cached", "--quiet").returncode == 0:
         log("no changes to publish")
         return 0

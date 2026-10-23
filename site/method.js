@@ -43,7 +43,7 @@ function viewMethod() {
   return String.raw`<section class="hero" style="margin-bottom:8px"><div><span class="pill"><span class="dot"></span>Methodology</span>
     <h1 style="font-size:clamp(36px,5vw,56px)">How Tipoff<br><em>prices a game.</em></h1>
     <p class="lede">A regularized logistic regression on team strength, recent form, rest and a credibility-weighted rating of the players actually available. Every number on this page comes from the live model.</p></div>
-    <nav class="toc card">${[["data", "Data"], ["team", "Team features"], ["players", "Player ratings"], ["lineup", "Lineups & availability"], ["model", "The model"], ["valid", "Validation"], ["market", "Betting market"], ["metrics", "Why these metrics"], ["limits", "Limitations"]]
+    <nav class="toc card">${[["data", "Data"], ["team", "Team features"], ["players", "Player ratings"], ["lineup", "Lineups & availability"], ["model", "The model"], ["valid", "Validation"], ["market", "Betting market"], ["beat", "Can it beat the market?"], ["metrics", "Why these metrics"], ["limits", "Limitations"]]
       .map(([id, t], i) => `<a href="#/how" data-jump="${id}"><span class="mono muted">${String(i + 1).padStart(2, "0")}</span> ${t}</a>`).join("")}</nav></section>
 
   <article class="prose method">
@@ -81,7 +81,7 @@ function viewMethod() {
   <p style="margin-top:10px">Minutes and PIE fall steadily with draft position. Game Score per 36 is flatter, because high picks are often given high-usage, low-efficiency roles early. Draft position mostly tells the model how much a rookie will play. Expected minutes for veterans are an exponentially weighted mean with a 6-game half-life.</p>
 
   <h2 id="lineup">4 · Lineups & availability</h2>
-  <p>For each game, every player on the team gets availability \(a_j\): 0 if listed out (or entered as a <b>late scratch</b>), ½ if day-to-day, 1 otherwise. The lineup is the top 10 players by \(w_j = \hat m_j\,a_j\), where \(\hat m_j\) is expected minutes, and the lineup features are:</p>
+  <p>For each game, every player on the team gets availability \(a_j\): 0 if listed out, ½ if day-to-day, 1 otherwise. On the site you can tap any player in a game's rotation to mark him out or back in. The browser recomputes both lineups with these formulas and adds the change in the model's index to the published log-odds, so the price updates instantly. The lineup is the top 10 players by \(w_j = \hat m_j\,a_j\), where \(\hat m_j\) is expected minutes, and the lineup features are:</p>
   $$\text{L}^{(x)} = \frac{\sum_{j \in \text{top10}} w_j\,\hat r^{(x)}_j}{\sum_{j \in \text{top10}} w_j}, \qquad \text{Star} = \max_{j:\,w_j \ge 20} \hat r^{\text{GmSc}}_j, \qquad \text{Depth} = \sum_{j \in \text{top10}} w_j$$
   <p>Normalizing by \(\sum w_j\) redistributes a missing player's minutes to the rest of the rotation at their own ratings, so losing a star costs exactly the gap between him and his replacements. In training, the players who actually appeared define the lineup, with \(a = 1\). Restricting to the top 10 by expected minutes keeps garbage-time appearances from leaking the result into the features.</p>
 
@@ -115,17 +115,40 @@ function viewMethod() {
   <p>The live record, graded against closing lines, is the clean out-of-sample test.</p>
 
   <h2 id="market">7 · Betting market</h2>
-  <p>Moneylines come from The Odds API: US sportsbooks, head-to-head market. American odds convert to decimal \(d = 1 + \text{ML}/100\) for \(\text{ML} > 0\) and \(d = 1 + 100/|\text{ML}|\) otherwise, with implied probability \(q = 1/d\). Each book's margin, or overround \(q_h + q_a - 1\), is removed multiplicatively, and the books are averaged:</p>
-  $$p^{\text{mkt}}_h = \frac{1}{B}\sum_{b=1}^{B} \frac{q_{h,b}}{q_{h,b} + q_{a,b}}$$
-  <p>Snapshots are taken about hourly up to tipoff. The last one before tipoff is the <b>closing line</b>, the standard efficient benchmark that live picks are graded against. For past seasons, the backtest uses the moneylines ESPN recorded for each game, de-vigged the same way. From 2012-13 these are listed under TeamRankings and numberFire, later under ESPN's consensus and DraftKings. Where they overlap, the providers' de-vigged probabilities correlate at 0.996 or higher with the consensus and differ by about 1 point on average, so they're market prices, not those sites' own projections. 2010-12 has no lines. Over the ${vm.n ? vm.n.toLocaleString() : 0} backtest games with a line, the market picked ${vm.n ? pct(vm.market.accuracy, 1) : "—"} of winners against the model's ${vm.n ? pct(vm.model.accuracy, 1) : "—"}, with log loss ${vm.n ? vm.market.log_loss : "—"} against ${vm.n ? vm.model.log_loss : "—"}.</p>
-  <p>The <b>best value</b> card ranks every side of every game by expected return per $1 at the best available price, using the model's probability:</p>
-  $$\text{EV} = p^{\text{model}} \cdot d_{\text{best}} - 1$$
+  <p>Live moneylines are DraftKings' lines as published on ESPN's scoreboard, free and keyless. American odds convert to decimal \(d = 1 + \text{ML}/100\) for \(\text{ML} > 0\) and \(d = 1 + 100/|\text{ML}|\) otherwise, with implied probability \(q = 1/d\). The book's margin, or overround \(q_h + q_a - 1\), is removed multiplicatively:</p>
+  $$p^{\text{mkt}}_h = \frac{q_h}{q_h + q_a}$$
+  <p>Snapshots are taken hourly through the day and every 30 minutes in the run-up to tipoff. The last one before tipoff is the <b>closing line</b>, the standard efficient benchmark that live picks are graded against. For past seasons, the backtest uses the moneylines ESPN recorded for each game, de-vigged the same way. From 2012-13 these are listed under TeamRankings and numberFire, later under ESPN's consensus and DraftKings. Where they overlap, the providers' de-vigged probabilities correlate at 0.996 or higher with the consensus and differ by about 1 point on average, so they're market prices, not those sites' own projections. 2010-12 has no lines. Over the ${vm.n ? vm.n.toLocaleString() : 0} backtest games with a line, the market picked ${vm.n ? pct(vm.market.accuracy, 1) : "—"} of winners against the model's ${vm.n ? pct(vm.model.accuracy, 1) : "—"}, with log loss ${vm.n ? vm.market.log_loss : "—"} against ${vm.n ? vm.model.log_loss : "—"}.</p>
+  <p>The <b>best value</b> card ranks every side of every game by expected return per $1 at the posted price, using the model's probability:</p>
+  $$\text{EV} = p^{\text{model}} \cdot d - 1$$
   <p>A positive EV means the model rates a side above the price on offer. Since the closing line is usually better calibrated than any public model, read it as a disagreement worth checking, not a bet.</p>
   <p><b>Point spreads</b> come from ESPN's scoreboard (DraftKings) and are shown for reference only. They are never a model input. For comparison, the model's probability is converted to an implied spread, assuming the final margin is normal with standard deviation \(\sigma = 12\) points:</p>
   $$\text{margin}_h = \sigma\,\Phi^{-1}\!\big(p^{\text{model}}_h\big), \qquad \text{spread}_h = -\,\text{margin}_h$$
-  <p><b>Credit budget.</b> The free plan allows 500 calls a month, and each call returns every upcoming game for 1 credit. The schedule allows 15 calls a day. Each call is also skipped unless a game starts within 24 hours and the remaining credits \(c\) satisfy \(c - 1 \ge \max(10,\;15 \times \text{days left in the month})\).</p>
 
-  <h2 id="metrics">8 · Why these player metrics</h2>
+  <h2 id="beat">8 · Can it beat the market?</h2>
+  <p>Short answer: not on its own, and nothing tried so far changes that. Every candidate below went through the same walk-forward backtest and was scored on the 14,944 games from 2012-13 onward that have a market line. The last column is the model's log loss minus the market's, with a paired standard error (positive means the market is better).</p>
+  <div class="card table-wrap"><table><thead><tr><th>Variant</th><th class="r">Accuracy</th><th class="r">Market</th><th class="r">Δ log loss vs market</th></tr></thead><tbody>
+    <tr><td>Default model</td><td class="r mono">67.3%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0011</td></tr>
+    <tr><td>+ Tipoff Impact (custom player metric)</td><td class="r mono">67.6%</td><td class="r mono">68.0%</td><td class="r mono">+0.0067 ± 0.0012</td></tr>
+    <tr><td>+ travel, time zones, 3-in-4 nights, altitude</td><td class="r mono">67.5%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0012</td></tr>
+    <tr><td>+ Massey (opponent-adjusted) ratings</td><td class="r mono">67.2%</td><td class="r mono">68.0%</td><td class="r mono">+0.0071 ± 0.0011</td></tr>
+    <tr><td>All of the above</td><td class="r mono">67.3%</td><td class="r mono">68.0%</td><td class="r mono">+0.0068 ± 0.0012</td></tr>
+    <tr><td>Market line + all model features (13,713 games)</td><td class="r mono">67.9%</td><td class="r mono">68.0%</td><td class="r mono">+0.0010 ± 0.0006</td></tr>
+    <tr><td><b>Tipoff × Market stack</b> (13,713 games)</td><td class="r mono"><b>${D.backtest.blend ? pct(D.backtest.blend.vs_market.model.accuracy, 1) : "—"}</b></td><td class="r mono">${D.backtest.blend ? pct(D.backtest.blend.vs_market.market.accuracy, 1) : "—"}</td><td class="r mono">+0.0002 ± 0.0002</td></tr>
+  </tbody></table></div>
+  <h3>Tipoff Impact (TPI)</h3>
+  <p>A custom, BPM-style player metric. Each player-game's box score is converted to rates per 100 on-court possessions \(z_k\), and the estimated on-court net rating is regressed on them by minutes-weighted ridge regression:</p>
+  $$\text{TPI} = \alpha + \sum_k \gamma_k z_k$$
+  <p>It was fit only on 2010-11 and 2011-12, so no backtest season informs its coefficients. Fitted per-100 weights: points +1.11, FGM −0.52, FGA −0.83, FTA −0.61, defensive rebounds +0.80, assists +0.93, steals +1.00, blocks +0.75, turnovers −1.03, fouls −0.20, offensive rebounds ≈ 0 (\(\alpha = -9.3\)). TPI then goes through the same credibility weighting and lineup aggregation as the other metrics. It's sensible, and slightly better than leaving it out, but the gain (0.0004) is inside the noise. It's available as an input in the <a href="#/lab">Model Lab</a>, along with Massey ratings and the travel and schedule inputs.</p>
+  <h3>Massey ratings</h3>
+  <p>Before each game day, a recency-weighted ridge regression of every prior margin (capped at 30, 45-day half-life, 400-day window) on team indicators plus home court:</p>
+  $$\min_{r, h}\; \sum_g w_g \big(\text{MOV}_g - (r_{\text{home}(g)} - r_{\text{away}(g)} + h)\big)^2 + \lambda \lVert r \rVert^2$$
+  <h3>The stack</h3>
+  <p>The only construction that matched the market is a two-input logistic stack, fit walk-forward on earlier seasons' games that had a line:</p>
+  $$\operatorname{logit} p = a + b\,\operatorname{logit} p^{\text{mkt}} + c\,\operatorname{logit} p^{\text{model}}$$
+  <p>Fit on all games with a line, the weights are \(b = ${D.backtest.blend ? D.backtest.blend.coef.market : "—"}\) and \(c = ${D.backtest.blend ? D.backtest.blend.coef.model : "—"}\). The market carries most of the information, and the model adds a small, mostly redundant correction. It's shown on every game as "Tipoff × Market".</p>
+  <p><b>Why the market is hard to beat.</b> The closing line aggregates injury news up to tipoff, lineup and rest decisions, tracking-based player value and the money of bettors who have their own models. This model's information is a subset of that: public box scores and the injury report. Raw accuracy also has little statistical power here. On 15,000 games, the standard error of an accuracy figure is about 0.4 points, so a gap under about 1 point between two models is mostly noise. Log loss is the sharper test, and it consistently favors the market. Better information would move the needle more than more modeling: earlier and more precise availability, minutes restrictions, or play-by-play on/off data for a true RAPM. Without that, a public box-score model doesn't get past the closing line.</p>
+
+  <h2 id="metrics">9 · Why these player metrics</h2>
   <p>The player layer needs a rating that (a) updates daily from data free in the cloud, (b) works at the single-game level so it can be decayed and credibility-weighted, (c) is a rate, not a volume measure, since minutes are handled separately, and (d) captures both box-score production and non-box impact. Here's how the common alternatives fare:</p>
   <div class="card table-wrap"><table><thead><tr><th>Metric</th><th>What it is</th><th>Why not (or not yet)</th></tr></thead><tbody>
     <tr><td><b>Win Shares</b></td><td>Credits team wins to players via marginal offense and defense</td><td>A cumulative volume measure. Per-48 helps, but the defensive half is mostly team defense split by minutes and rebounds, so it double-counts what Elo and team form already carry. Needs Basketball-Reference's season-level pipeline.</td></tr>
@@ -137,7 +160,7 @@ function viewMethod() {
   </tbody></table></div>
   <p style="margin-top:10px">The three chosen metrics complement each other. Game Score/36 measures scoring and box production per minute. PIE measures share of all box events, which adjusts for game context and tempo. On-court net rating carries the non-box signal (defense, spacing, screening) that box metrics miss, though it's noisy per game. That's the reason for credibility weighting and for letting the regression set its weight. Together they took the backtest log loss from 0.624 (team features only) to 0.605. Candidate metrics are judged on the same walk-forward log loss, so swapping in BPM is a straightforward experiment.</p>
 
-  <h2 id="limits">9 · Limitations</h2>
+  <h2 id="limits">10 · Limitations</h2>
   <ul>
     <li>Minutes restrictions and in-game injuries are invisible. Day-to-day is a blunt half-weight.</li>
     <li>Coaching, scheme and matchup interactions are absent. There are no player-vs-player effects.</li>

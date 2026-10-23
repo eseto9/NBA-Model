@@ -19,7 +19,12 @@ MIN_HALFLIFE = 6         # player games, for expected minutes
 PRIOR_MIN = 250          # pseudo-minutes of newcomer-level play blended into each rating
 LINEUP_SIZE = 10         # top players by expected minutes that make up the lineup
 DTD_WEIGHT = 0.5         # day-to-day players count for half their expected minutes
-METRICS = ["pie", "net", "gmsc"]
+METRICS = ["pie", "net", "gmsc", "tpi"]   # tpi is a Model Lab input; the default model uses the first three
+# Tipoff Impact: box-score rates per 100 possessions regressed onto on-court plus-minus (a homemade
+# BPM). Fit once on 2010-11 and 2011-12 only (tools/experiments.py), so it never saw a backtest season.
+TPI_COEF = {"PTS": 1.107, "FGM": -0.523, "FGA": -0.828, "FTA": -0.605, "OREB": 0.03, "DREB": 0.804,
+            "AST": 0.93, "STL": 1.001, "BLK": 0.754, "TOV": -1.026, "PF": -0.202}
+TPI_INTERCEPT = -9.27
 
 def call(make, label, tries=4):
     for attempt in range(tries):
@@ -68,7 +73,9 @@ def add_metrics(pg):
     team = pg.groupby(["GAME_ID", "TEAM_ID"])[["FGA", "OREB", "TOV", "FTA"]].transform("sum")
     team_poss = team.FGA - team.OREB + team.TOV + 0.44 * team.FTA
     game_poss = team_poss.groupby(pg.GAME_ID).transform("mean")
-    pg["net"] = (100 * pg.PLUS_MINUS / (game_poss * pg.MIN / 48)).clip(-100, 100)
+    on_poss = game_poss * pg.MIN / 48
+    pg["net"] = (100 * pg.PLUS_MINUS / on_poss).clip(-100, 100)
+    pg["tpi"] = (TPI_INTERCEPT + sum(c * 100 * pg[k] / on_poss for k, c in TPI_COEF.items())).clip(-60, 60)
     return pg
 
 

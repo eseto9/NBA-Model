@@ -97,7 +97,7 @@ def game_json(row, roster, steps):
             "rest": int(row[f"rest{sfx}"]), "form_net": r(row[f"f_net{sfx}"], 1),
             "form_ortg": r(row[f"f_ortg{sfx}"], 1), "form_drtg": r(row[f"f_drtg{sfx}"], 1),
             "lineup": {k: r(row[f"lu_{k}{sfx}"]) for k in ("pie", "net", "gmsc", "star", "min")},
-            "rotation": rotation(roster, row[f"{s}_id"]),
+            "rotation": rotation(roster, row[f"{s}_id"], 13),
         }
     p = float(row.home_win_prob)
     return {
@@ -218,7 +218,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 3        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 4        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():
@@ -247,6 +247,26 @@ def versus_market(df):
             "disagree_model_right": int(((dis.p >= 0.5) == (dis.y == 1)).sum())}
 
 
+def logit(p):
+    p = np.clip(np.asarray(p, float), 1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
+def blend_walk_forward(df):
+    """Tipoff x Market: logit p = a + b*logit(market) + c*logit(model), fit season by season on
+    earlier seasons' games that had a line. Returns (blended predictions, coefficients fit on all)."""
+    from sklearn.linear_model import LogisticRegression
+    m = df[df.p_market.notna()]
+    out = []
+    for s in sorted(m.season.unique())[1:]:
+        tr, te = m[m.season < s], m[m.season == s]
+        fit = LogisticRegression(C=1.0).fit(np.c_[logit(tr.p_market), logit(tr.p)], tr.y)
+        out.append(te.assign(p=fit.predict_proba(np.c_[logit(te.p_market), logit(te.p)])[:, 1]))
+    fit = LogisticRegression(C=1.0).fit(np.c_[logit(m.p_market), logit(m.p)], m.y)
+    coef = {"a": r(fit.intercept_[0], 4), "market": r(fit.coef_[0][0], 4), "model": r(fit.coef_[0][1], 4)}
+    return pd.concat(out), coef
+
+
 def backtest_all(g):
     """Walk-forward backtest of every season: each season is predicted by a model trained
     only on the seasons before it. Returns per-season and overall results, with the market."""
@@ -260,6 +280,7 @@ def backtest_all(g):
                                    "away": test.away.values, "p": p, "y": (test.home_pts > test.away_pts).astype(int).values}))
         print(f"  backtest {nba.season_str(s)}")
     df = pd.concat(games).merge(historical_market(), on=["date", "home", "away"], how="left")
+    blend, blend_coef = blend_walk_forward(df)
     per_season = []
     for s, d in df.groupby("season"):
         season_sum = summary(d.p, d.y)
@@ -270,6 +291,7 @@ def backtest_all(g):
     days = df.assign(hit=(df.p >= 0.5) == (df.y == 1)).groupby("date").hit.agg(["sum", "count"]).reset_index()
     return {"version": BACKTEST_VERSION, "through": nba.season_str(seasons[-1]), "first": nba.season_str(seasons[0]),
             "overall": summary(df.p, df.y), "vs_market": versus_market(df), "seasons": per_season,
+            "blend": {"coef": blend_coef, "vs_market": versus_market(blend)},
             "daily": [[d, int(s), int(c)] for d, s, c in days.values.tolist()]}
 
 
@@ -287,14 +309,16 @@ LAB_GROUPS = [   # key, label, features, on by default, description
     ("star", "Players: best available", ["d_lu_star"], True, "Highest-rated available player expected to play 20+ minutes."),
     ("depth", "Players: rotation minutes", ["d_lu_min"], True, "Expected minutes of the top 10 available players (missing-player load)."),
     ("pace", "Pace (tempo)", ["d_pace"], False, "Difference in recent possessions per game. Off by default: tempo says little about who wins."),
+    ("tpi", "Players: Tipoff Impact (custom)", ["d_lu_tpi"], False, "Our own BPM-style metric: box-score rates per 100 possessions regressed onto on-court plus-minus, fit on 2010-12 only."),
+    ("massey", "Massey ratings", ["x_massey"], False, "Opponent-adjusted team ratings: recency-weighted ridge regression of every margin on team indicators."),
+    ("travel", "Travel & schedule density", ["x_travel", "x_tz", "x_dense", "x_load7", "x_altitude"], False, "Distance since the last game, time-zone shift, 3-in-4 nights, games in 7 days, Denver/Utah altitude."),
 ]
 LAB_UNAVAILABLE = [
     ("LEBRON", "BBall Index's tracking-based plus-minus. Proprietary and paywalled, no free daily feed."),
     ("VORP", "Volume stat (BPM x minutes share). Minutes are already modeled through expected minutes and availability."),
     ("Win Shares", "Cumulative, and its defensive half is mostly team defense, which Elo and form already carry."),
-    ("BPM", "Box Plus/Minus is computable from box scores and is the planned next player metric."),
 ]
-LAB_VERSION = 1
+LAB_VERSION = 2
 
 
 def lab_columns(rows, X, market):
@@ -374,7 +398,7 @@ def main(date=None, refresh=True):
     graded = back.merge(log[keys + ["game_id", "p_home"]], on=keys, how="outer")
     graded["source"] = np.where(graded.p_home.notna(), "live", "backfill")
     graded["p_home"] = graded.p_home.fillna(graded.p_back)
-    # closing line: The Odds API's last pre-tip snapshot, else ESPN's line
+    # closing line: last pre-tip snapshot from the live feed, else the line ESPN stored with the box score
     closing = odds.closing_lines()[keys + ["p_home", "home_ml", "away_ml"]].rename(columns={"p_home": "p_close"})
     espn_lines = historical_market()
     graded = graded.merge(closing, on=keys, how="left").merge(espn_lines, on=keys, how="left")

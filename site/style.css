@@ -179,7 +179,7 @@ h3 { font: 600 15px var(--font); margin: 0; }
 .chart .lbl-ink { fill: var(--ink); }
 .grow { transform-box: fill-box; transform-origin: left center; animation: growx .9s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes growx { from { transform: scaleX(0); } }
-.draw { stroke-dasharray: 3000; stroke-dashoffset: 3000; animation: draw 1.8s cubic-bezier(.4, 0, .2, 1) forwards; }
+.draw { animation: draw 1.8s cubic-bezier(.4, 0, .2, 1) forwards; }   /* dash length set per path in animateIn */
 @keyframes draw { to { stroke-dashoffset: 0; } }
 .pop { transform-box: fill-box; transform-origin: center; animation: pop .5s cubic-bezier(.3, 1.6, .5, 1) both; }
 @keyframes pop { from { transform: scale(0); } }
@@ -352,3 +352,43 @@ td.r, th.r { text-align: right; }
 .custom-banner { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin: -20px 0 24px; border-color: var(--orange); font-size: 14px; }
 .custom-banner a { color: var(--orange); }
 @media (max-width: 860px) { .lab { grid-template-columns: 1fr; } .lab-controls { position: static; max-height: none; } }
+
+/* on-site scratches */
+.pl { cursor: pointer; border-radius: 6px; padding-left: 4px; margin-left: -4px; }
+.pl:hover { background: var(--card-2); }
+.pl.mine .pl-name { font-weight: 600; }
+.tag.mine-tag { background: var(--orange); color: #fff; font-size: 10px; padding: 1px 5px; }
+.scratch-note { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px;
+  padding: 6px 10px; border-radius: 8px; background: var(--orange-soft); font-size: 12.5px; }
+.lock-position { display: inline-block; font: 600 12px var(--mono); background: var(--orange); color: #fff; padding: 3px 8px; border-radius: 6px; margin-bottom: 8px; }
+.value-line b { color: var(--orange); }
+
+/* pick log */
+.strip { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.sq { width: 14px; height: 14px; border-radius: 3px; display: block; animation: pop .4s cubic-bezier(.3, 1.6, .5, 1) both; cursor: default; }
+.sq.hit { background: var(--good); }
+.sq.miss { background: var(--bad); }
+.sq.pend { background: var(--line); }
+.sq.bf { opacity: .55; }
+.bf-key { background: var(--good) !important; opacity: .55; }
+.sub-h { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 18px 0 4px; }
+.days { display: grid; gap: 18px; margin-top: 12px; }
+.day-head { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 14px; }
+.day-bar { flex: 0 0 90px; height: 6px; border-radius: 3px; background: var(--bad); overflow: hidden; }
+.day-bar i { display: block; height: 100%; background: var(--good); }
+.pick { display: grid; grid-template-columns: 150px 1fr 180px 92px; gap: 14px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--line-2); transition: background .15s; }
+.pick:hover { background: var(--card-2); }
+.pick-match { display: flex; align-items: center; gap: 6px; }
+.pick-match .badge { width: 30px; height: 30px; font-size: 9.5px; }
+.pick-lbl { font-size: 13px; margin-bottom: 4px; }
+.pb-track { position: relative; height: 8px; background: var(--card-2); border-radius: 4px; }
+.pb-track i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 4px; transition: width 1s cubic-bezier(.2, .8, .2, 1); opacity: .85; }
+.pb-mkt { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; background: var(--ink); border-radius: 2px; box-shadow: 0 0 0 2px var(--card); }
+.pb-half { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); opacity: .5; }
+.pick-score { font-size: 13px; color: var(--muted); }
+.pick-score .w { color: var(--ink); font-weight: 600; }
+.res { justify-self: end; font: 600 12px var(--mono); padding: 4px 9px; border-radius: 999px; }
+.res.hit { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.res.miss { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.res.pend { background: var(--card-2); color: var(--muted); font-weight: 400; }
+@media (max-width: 700px) { .pick { grid-template-columns: 1fr 86px; } .pick-bar { grid-column: 1 / -1; grid-row: 2; } .pick-score { grid-column: 1; } }

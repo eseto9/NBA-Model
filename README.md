@@ -31,25 +31,33 @@ seasons), next to the betting market on the same games.
 | Always pick the home team | 55.4% | 0.689 |
 
 ## Betting odds
-[odds.py](odds.py) pulls moneylines from [The Odds API](https://the-odds-api.com) (US books, moneyline market, 1 credit
-per call). The free plan has 500 credits a month, so [`.github/workflows/odds.yml`](.github/workflows/odds.yml)
-runs hourly from 14:05 to 03:05 UTC. With the morning run that's 15 calls a day, about 465 in a 31-day month.
-`odds.py` also skips a call when no game starts in the next 24 hours, or when the remaining credits wouldn't cover the
-rest of the month. Each book's margin is removed and the books are averaged into a market probability. The last
-snapshot before tipoff is the closing line that live picks are compared against (`log/odds.csv`).
-
-The API key is read from the `ODDS_API_KEY` repository secret (Settings → Secrets and variables → Actions).
+[odds.py](odds.py) reads DraftKings' moneyline, spread and total from ESPN's public scoreboard. It's free with no key,
+so [`.github/workflows/odds.yml`](.github/workflows/odds.yml) polls hourly through the day and every 30 minutes in the
+run-up to tipoff. The margin is removed to give a market probability. Every snapshot goes to `log/odds.csv`, and the
+last one before tipoff is the closing line that picks are graded against.
 
 For past seasons, [tools/hist_odds.py](tools/hist_odds.py) collected the betting lines ESPN recorded for each game
 (`data/nba/odds_hist.csv.gz`). The backtest compares the model against them.
 
-Point spreads and totals come free from ESPN's scoreboard on every odds run. They're displayed next to the spread
+Point spreads and totals come from the same scoreboard call. They're displayed next to the spread
 implied by the model (normal margin, SD 12) but are never a model input.
 
 ## Late scratches
-Actions → **Late scratch** → Run workflow, then enter the players who won't play (and optionally any listed as out
-who will). It records them in `data/overrides.csv`, re-prices today's slate and redeploys the site. Overrides last
-through the next day. Picks can be revised until tipoff, then they're frozen.
+On the site, open a game and tap a player in either rotation to mark him out, or back in if he's listed as out. The
+browser recomputes both lineups with the model's own formulas and re-prices the game instantly. This is saved in
+your browser only. To change the published picks for everyone, run Actions → **Late scratch**, which records the
+change in `data/overrides.csv`, re-prices the slate and redeploys.
+
+## Beating the market
+[tools/experiments.py](tools/experiments.py) tests new inputs walk-forward against the historical market line:
+- **Tipoff Impact**, a custom BPM-style player metric: box-score rates regressed onto on-court plus-minus, fit on 2010-12 only
+- **Travel and schedule density**
+- **Massey ratings**
+- **Market stacking**
+
+None beat the closing line on log loss. A two-input stack (`logit p = a + b·logit(market) + c·logit(model)`)
+ties it, and the site shows it as "Tipoff × Market". The new inputs are optional in the Model Lab, and the full
+write-up is on the site's Methodology page.
 
 ## Model Lab
 The site's Model Lab (`site/lab.js`) refits the model in the browser, in a Web Worker. You can choose L2 logistic
