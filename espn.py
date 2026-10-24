@@ -99,12 +99,13 @@ class PlayerIds:
 # ---------------------------------------------------------------- box scores
 
 def stat(stats, labels, key):
-    return stats[labels.index(key)] if key in labels else "0"
+    v = stats[labels.index(key)] if key in labels and labels.index(key) < len(stats) else "0"
+    return "0" if v in ("", "--", None) else v              # ESPN shows "--" for a stat it doesn't have
 
 
 def split(v):
-    m, a = (v or "0-0").split("-")
-    return int(m), int(a)
+    m, a = (v if v not in ("", "--", "0", None) else "0-0").split("-")
+    return int(m or 0), int(a or 0)
 
 
 def box_score(ev, team_ids, team_names, ids):
