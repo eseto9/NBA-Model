@@ -66,16 +66,25 @@ function dayStrip() {
   const chip = (d) => {
     const rec = dayRecord(d), today = isToday(d), past = d < D.slate.date;
     const realToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-    const sub = today ? (d === realToday ? "today" : "next up") : rec ? `${rec[0]}–${rec[1] - rec[0]}` : past ? "" : "upcoming";
+    const sub = today ? todayChipText(d === realToday) : rec ? `${rec[0]}–${rec[1] - rec[0]}` : past ? "" : "upcoming";
     const [Y, M, Dd] = d.split("-").map(Number), dt = new Date(Y, M - 1, Dd);
     return `<a class="day-chip ${d === cur ? "on" : ""} ${today ? "today" : ""} ${rec ? (rec[0] / rec[1] >= 0.5 ? "good" : "bad") : ""}" href="#/day/${d}">
-      <span class="dc-wd">${dt.toLocaleDateString("en-US", { weekday: "short" })}</span><b>${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</b><span class="dc-sub">${sub}</span></a>`;
+      <span class="dc-wd">${dt.toLocaleDateString("en-US", { weekday: "short" })}</span><b>${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</b><span class="dc-sub" ${today ? 'id="today-chip"' : ""}>${sub}</span></a>`;
   };
   return `<div class="day-nav">
     <a class="day-arrow ${i <= 0 ? "off" : ""}" href="#/day/${days[Math.max(0, i - 1)]}" aria-label="Previous day">‹</a>
     <div class="day-strip" id="day-strip">${days.map(chip).join("")}</div>
     <a class="day-arrow ${i >= days.length - 1 ? "off" : ""}" href="#/day/${days[Math.min(days.length - 1, i + 1)]}" aria-label="Next day">›</a>
   </div>`;
+}
+
+/* today's chip: tonight's record so far, with a live dot while games are on */
+function todayChipText(isRealToday) {
+  const games = D.slate.games, done = games.filter((g) => g.live && g.live.state === "post");
+  const live = games.some((g) => g.live && g.live.state === "in");
+  if (!done.length) return live ? `<i class="live-dot"></i> live` : isRealToday ? "today" : "next up";
+  const hit = done.filter((g) => (g.live.hs > g.live.as) === (g.p_home >= 0.5)).length;
+  return `${live ? '<i class="live-dot"></i> ' : ""}${hit}–${done.length - hit}`;
 }
 
 function dayHeading(day, games) {

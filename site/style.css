@@ -486,3 +486,4 @@ td.r, th.r { text-align: right; }
 .pl.Questionable .pl-bar i, .pl.Doubtful .pl-bar i, .pl.Probable .pl-bar i { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .55) 0 2px, transparent 2px 5px); }
 .pl.Doubtful .pl-name { color: var(--muted); }
 .mkt-stat { color: var(--slate); }
+.day-chip .live-dot { width: 6px; height: 6px; vertical-align: 1px; }

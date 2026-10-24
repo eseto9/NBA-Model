@@ -180,6 +180,10 @@ function paintTonight() {
   }
   const split = document.getElementById("split-wrap");
   if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);
+  const chip = document.getElementById("today-chip");
+  if (chip && typeof todayChipText === "function") {
+    chip.innerHTML = todayChipText(D.slate.date === new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
+  }
   const el = document.getElementById("tonight");
   if (!el) return;
   const games = D.slate.games, live = games.filter((g) => g.live && g.live.state === "in").length;
