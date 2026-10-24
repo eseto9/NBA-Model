@@ -489,38 +489,70 @@ function slateDayLabel() {
 }
 
 /* season record, counting tonight's finished games before the morning update grades them */
+/* profit on a $100 moneyline bet on the home or away side */
+function betProfit(home, homeWon, aml, hml) {
+  const price = home ? hml : aml;
+  return home !== homeWon ? -100 : price > 0 ? price : (100 * 100) / -price;
+}
+
 function seasonRecord() {
   let hit = 0, n = 0, mHit = 0, mN = 0;
+  const money = { tipoff: 0, model: 0, market: 0, n: 0 };
+  const bet = (pHome, pModel, pMkt, homeWon, aml, hml) => {
+    if (aml == null || hml == null || pMkt == null) return;
+    money.n++;
+    money.tipoff += betProfit(pHome >= 0.5, homeWon, aml, hml);
+    money.model += betProfit((pModel ?? pHome) >= 0.5, homeWon, aml, hml);
+    money.market += betProfit(pMkt >= 0.5, homeWon, aml, hml);
+  };
   const graded = new Set();
   for (const p of D.record.picks) {
     if (!p.score) continue;
     n++; hit += isHit(p); graded.add(`${p.date}|${p.away}|${p.home}`);
     if (p.p_market != null) { mN++; mHit += (p.p_market >= 0.5) === (p.score[1] > p.score[0]); }
+    if (p.ml) bet(p.p_home, p.p_model, p.p_market, p.score[1] > p.score[0], p.ml[0], p.ml[1]);
   }
   for (const g of D.slate.games) {
     if (!g.live || g.live.state !== "post" || graded.has(`${D.slate.date}|${g.away.abbr}|${g.home.abbr}`)) continue;
     const homeWon = g.live.hs > g.live.as;
     n++; hit += homeWon === (g.p_home >= 0.5);
-    if (g.market) { mN++; mHit += homeWon === (g.market.p_home >= 0.5); }
+    if (g.market) {
+      mN++; mHit += homeWon === (g.market.p_home >= 0.5);
+      bet(g.p_home, g.p_model, g.market.p_home, homeWon, g.market.away_ml, g.market.home_ml);
+    }
   }
-  return { hit, n, mHit, mN };
+  return { hit, n, mHit, mN, money };
 }
+
+const usd = (x) => `${x < 0 ? "−" : "+"}$${Math.abs(Math.round(x)).toLocaleString()}`;
 
 function splitPanel(games) {
   if (!games) return "";
   const split = games.filter(disagrees);
-  const past = D.record.picks.filter((p) => p.score && p.p_market != null && (p.p_home >= 0.5) !== (p.p_market >= 0.5));
-  const modelRight = past.filter(isHit).length;
+  // the model on its own vs the market, this season including tonight's finished games
+  const seen = new Set(), past = [];
+  for (const p of D.record.picks) {
+    if (!p.score || p.p_market == null) continue;
+    seen.add(`${p.date}|${p.away}|${p.home}`);
+    const pm = p.p_model ?? p.p_home;
+    if ((pm >= 0.5) !== (p.p_market >= 0.5)) past.push((pm >= 0.5) === (p.score[1] > p.score[0]));
+  }
+  for (const g of D.slate.games) {
+    const w = winnerOf(g);
+    if (!w || !disagrees(g) || seen.has(`${D.slate.date}|${g.away.abbr}|${g.home.abbr}`)) continue;
+    past.push((modelP(g) >= 0.5 ? g.home.abbr : g.away.abbr) === w);
+  }
+  const modelRight = past.filter(Boolean).length;
   if (!split.length && !past.length) return "";
   return `<div class="split-panel card">
     <div class="split-head"><b>${split.length ? `Model and market disagree on ${split.length} game${split.length > 1 ? "s" : ""}` : "Model and market agree on every game"}</b>
       ${past.length ? `<span class="mono muted">when they've disagreed this season: model ${modelRight}–${past.length - modelRight}</span>` : ""}</div>
     ${split.length ? `<div class="split-list">${split.map((g) => {
-      const mSide = g.p_home >= 0.5 ? g.home : g.away, kSide = mSide === g.home ? g.away : g.home;
+      const mSide = modelP(g) >= 0.5 ? g.home : g.away, kSide = mSide === g.home ? g.away : g.home;
       const w = winnerOf(g);
       return `<a class="split-item ${w ? (w === mSide.abbr ? "won" : "lost") : ""}" href="${isToday(viewDay()) ? `#/game/${g.id}` : `#/day/${viewDay()}`}">
         <span>${badge(g.away.abbr, g.away.color)}<span class="at">@</span>${badge(g.home.abbr, g.home.color)}</span>
-        <span>Model <b>${esc(mSide.abbr)} ${pct(Math.max(g.p_home, 1 - g.p_home))}</b><br>Market <b>${esc(kSide.abbr)} ${pct(Math.max(g.market.p_home, 1 - g.market.p_home))}</b></span>
+        <span>Model <b>${esc(mSide.abbr)} ${pct(Math.max(modelP(g), 1 - modelP(g)))}</b><br>Market <b>${esc(kSide.abbr)} ${pct(Math.max(g.market.p_home, 1 - g.market.p_home))}</b></span>
         ${w ? `<span class="split-res">${w === mSide.abbr ? "✓ model" : "✓ market"}</span>` : ""}</a>`;
     }).join("")}</div>` : ""}
   </div>`;
@@ -541,6 +573,8 @@ function viewSlate() {
         <div class="stat"><b id="season-pct">${rec.n ? pct(rec.hit / rec.n, 1) : "—"}</b><span>Tipoff right this season</span></div>
         <div class="stat"><b id="season-mkt" class="mkt-stat">${rec.mN ? pct(rec.mHit / rec.mN, 1) : "—"}</b><span>market right this season</span></div>
         <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span>record this season</span></div>
+        <div class="stat"><b id="season-usd" class="${rec.money.tipoff < 0 ? "down" : "up"}">${rec.money.n ? usd(rec.money.tipoff) : "—"}</b><span>$100 on every Tipoff pick</span></div>
+        <div class="stat"><b id="season-usd-mkt" class="mkt-stat">${rec.money.n ? usd(rec.money.market) : "—"}</b><span>$100 on every market favorite</span></div>
       </div>
     </div>
     <div class="hero-picks" id="hero-picks">${heroPicks(currentGames(), viewDay())}</div>
@@ -845,7 +879,70 @@ function rollingChart() {
   return s;
 }
 
+/* $100 on every game at the moneyline: this season, and the backtest's running total */
+function moneyPanel(rec) {
+  const b = D.backtest.betting, m = rec.money;
+  const row = (label, v, cls) => `<div class="money-row"><span>${label}</span><b class="${cls}">${m.n ? usd(v) : "—"}</b></div>`;
+  return `<section class="card panel" style="margin-top:14px">
+    <div class="panel-head"><h3>$100 on every game</h3><span class="mono muted">at the betting line, one bet on every game</span></div>
+    <div class="money">
+      <div class="money-season"><span class="mono muted">${esc(D.meta.season)} · ${m.n} games</span>
+        ${row("Tipoff pick", m.tipoff, "tipoff")}${row("Model alone", m.model, "model")}${row("Market favorite", m.market, "market")}
+        <p class="muted money-note">Favorites pay less than they risk, and the book keeps a margin on every line, so betting every game loses a little on average unless the picks beat the prices.</p></div>
+      ${b ? `<div><span class="mono muted">Backtest ${esc(b.first)} to ${esc(D.backtest.through)} · ${b.n.toLocaleString()} games</span>${moneyChart()}
+        <div class="money-legend mono">${[["tipoff", "Tipoff pick"], ["model", "Model alone"], ["market", "Market favorite"]].map(([k, l]) => `<span><i class="sw-${k}"></i>${l} <b>${usd(b.total[k])}</b></span>`).join("")}</div></div>` : ""}
+    </div></section>`;
+}
+
+function moneyChart() {
+  const b = D.backtest.betting, pts = b.running, K = b.keys;
+  const W = 760, H = 240, m = { l: 66, r: 14, t: 12, b: 28 };
+  const vals = pts.flatMap((p) => p.slice(1));
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), step = niceStep((hi - lo) / 4);
+  const x = (i) => m.l + (i / Math.max(pts.length - 1, 1)) * (W - m.l - m.r), y = (v) => m.t + (1 - (v - lo) / (hi - lo || 1)) * (H - m.t - m.b);
+  let s = `<svg class="chart" id="money" viewBox="0 0 ${W} ${H}" role="img" aria-label="Running profit from $100 on every game">`;
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${v ? usd(v) : "$0"}</text>`;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1"/>`;
+  let last = "", lastX = -Infinity;
+  pts.forEach(([d], i) => {
+    const yr = +d.slice(0, 4), season = +d.slice(5, 7) >= 8 ? yr : yr - 1;
+    if (String(season) === last) return;
+    last = String(season);
+    if (x(i) - lastX < 44 || i > pts.length - 20) return;
+    lastX = x(i);
+    s += `<text x="${x(i)}" y="${H - 8}">${String(season).slice(2)}-${String(season + 1).slice(2)}</text>`;
+  });
+  K.forEach((k, j) => {
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[j + 1]).toFixed(1)}`).join("");
+    s += `<path class="draw money-${k}" d="${line}" fill="none" stroke-width="2" stroke-linejoin="round"/>`;
+  });
+  s += `<line id="money-x" y1="${m.t}" y2="${H - m.b}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0"/>`;
+  s += `<rect id="money-hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg>`;
+  moneyChart.ctx = { pts, x, W, m, K };
+  return s;
+}
+
+function niceStep(raw) {
+  const p = 10 ** Math.floor(Math.log10(Math.max(raw, 1))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+function bindMoney() {
+  const c = moneyChart.ctx, svg = $("#money");
+  if (!svg || !c) return;
+  const names = { tipoff: "Tipoff pick", model: "Model alone", market: "Market favorite" };
+  $("#money-hit").addEventListener("mousemove", (e) => {
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const i = clamp(Math.round(((pt.x - c.m.l) / (c.W - c.m.l - c.m.r)) * (c.pts.length - 1)), 0, c.pts.length - 1);
+    const p = c.pts[i];
+    for (const [k, v] of Object.entries({ x1: c.x(i), x2: c.x(i), opacity: 1 })) $("#money-x").setAttribute(k, v);
+    showTip(`Through ${dayLabel(p[0], { month: "short", day: "numeric", year: "numeric" })}<br>${c.K.map((k, j) => `${names[k]} <b>${usd(p[j + 1])}</b>`).join("<br>")}`, e);
+  });
+  $("#money-hit").addEventListener("mouseleave", () => { hideTip(); $("#money-x").setAttribute("opacity", 0); });
+}
+
 function bindRolling() {
+  bindMoney();
   const c = rollingChart.ctx, svg = $("#roll");
   if (!svg) return;
   $("#roll-hit").addEventListener("mousemove", (e) => {
@@ -875,6 +972,7 @@ function viewRecord() {
     <div class="card big-stat"><span>Backtest ${btSpan()}</span><b data-count="${(o.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><small>${o.correct.toLocaleString()} of ${o.n.toLocaleString()} games</small></div>
     <div class="card big-stat"><span>Market, same games</span><b ${vm.n ? `data-count="${(vm.market.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%"` : ""}>${vm.n ? "0" : "—"}</b><small>${vm.n ? `model ${pct(vm.model.accuracy, 1)} on these ${vm.n.toLocaleString()}` : "no lines"}</small></div>
   </section>
+  ${moneyPanel(rec)}
   ${vm.n ? `<section class="card panel vs-strip">
     <div class="vs-head"><span class="mono muted">When the model and the market disagreed on the favorite</span><b>${vm.disagree_n.toLocaleString()} games</b></div>
     <div class="vs-bar"><i style="background:var(--orange)" data-w="${pct(right, 1)}"></i><i style="background:var(--slate)" data-w="${pct(1 - right, 1)}"></i></div>

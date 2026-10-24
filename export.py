@@ -262,7 +262,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 7        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 8        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():
@@ -338,7 +338,28 @@ def backtest_all(g):
     return {"version": BACKTEST_VERSION, "through": nba.season_str(seasons[-1]), "first": nba.season_str(seasons[0]),
             "overall": summary(df.p, df.y), "vs_market": versus_market(df), "seasons": per_season,
             "blend": {"coef": blend_coef, "vs_market": versus_market(blend)},
+            "betting": flat_bets(blend.rename(columns={"p": "p_tipoff"}).merge(df[["date", "home", "away", "p"]], on=["date", "home", "away"])),
             "daily": [[d, int(s), int(c)] for d, s, c in days.values.tolist()]}
+
+
+def bet_profit(ml, won):
+    """Profit on a $100 moneyline bet."""
+    return np.where(won, np.where(ml > 0, ml, 100 * 100 / np.abs(ml)), -100.0)
+
+
+def flat_bets(d):
+    """$100 on every game at the book's moneyline: on the model's pick, on Tipoff's (model x market)
+    pick, and on the market favorite. Per season, plus a running total by date for the chart."""
+    d = d.dropna(subset=["hml", "aml"]).sort_values("date")
+    out = {}
+    for k, p in (("model", d.p), ("tipoff", d.p_tipoff), ("market", d.p_market)):
+        home = p >= 0.5
+        out[k] = bet_profit(np.where(home, d.hml, d.aml), home == (d.y == 1))
+    pr = pd.DataFrame(out, index=d.index).assign(date=d.date, season=d.season.map(nba.season_str))
+    seasons = [{"season": s, "n": int(len(x)), **{k: round(float(x[k].sum())) for k in out}} for s, x in pr.groupby("season")]
+    run = pr.groupby("date")[list(out)].sum().cumsum().round()
+    return {"n": int(len(pr)), "first": seasons[0]["season"] if seasons else None, "total": {k: round(float(pr[k].sum())) for k in out},
+            "seasons": seasons, "running": [[dt, *map(int, v)] for dt, v in zip(run.index, run.values.tolist())], "keys": list(out)}
 
 
 # ---------------------------------------------------------------- model lab

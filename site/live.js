@@ -181,6 +181,9 @@ function paintTonight() {
     document.getElementById("season-pct").textContent = rec.n ? pct(rec.hit / rec.n, 1) : "—";
     const mk = document.getElementById("season-mkt");
     if (mk) mk.textContent = rec.mN ? pct(rec.mHit / rec.mN, 1) : "—";
+    const u = document.getElementById("season-usd"), um = document.getElementById("season-usd-mkt");
+    if (u && rec.money.n) { u.textContent = usd(rec.money.tipoff); u.className = rec.money.tipoff < 0 ? "down" : "up"; }
+    if (um && rec.money.n) um.textContent = usd(rec.money.market);
   }
   const split = document.getElementById("split-wrap");
   if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);

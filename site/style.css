@@ -525,3 +525,23 @@ td.r, th.r { text-align: right; }
 
 /* market under the bar: text, not a second mark on the bar */
 .mkt-cmp { padding: 1px 7px; border-radius: 6px; background: var(--card-2); color: var(--ink-2); }
+
+/* $100 on every game */
+.stat b.up { color: var(--good); }
+.stat b.down { color: var(--bad); }
+.money { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 24px; align-items: start; }
+.money-season { display: grid; gap: 6px; }
+.money-row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line-2); }
+.money-row b { font: 700 22px var(--display); font-variant-numeric: tabular-nums; }
+.money-row b.tipoff { color: var(--orange); }
+.money-row b.market { color: var(--slate); }
+.money-note { font-size: 12.5px; margin: 6px 0 0; }
+.money-tipoff { stroke: var(--orange); }
+.money-model { stroke: var(--ink-2); stroke-dasharray: 5 4; }
+.money-market { stroke: var(--slate); }
+.money-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; margin-top: 6px; }
+.money-legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: 3px; }
+.sw-tipoff { background: var(--orange); }
+.sw-model { background: repeating-linear-gradient(90deg, var(--ink-2) 0 5px, transparent 5px 8px); }
+.sw-market { background: var(--slate); }
+@media (max-width: 760px) { .money { grid-template-columns: 1fr; } }
