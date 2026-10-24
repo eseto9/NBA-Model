@@ -429,6 +429,13 @@ function lockResult(g, side, price) {
     <span>final ${esc(g.away.abbr)} ${g.live.as} – ${g.live.hs} ${esc(g.home.abbr)}</span></div>`;
 }
 
+/* "games today", or the next day with games when today has none (the slate is always the next game day) */
+function slateDayLabel() {
+  if (!D.slate.date) return "games scheduled";
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  return D.slate.date === today ? "games today" : `games ${dayLabel(D.slate.date, { weekday: "short" })} · next game day`;
+}
+
 /* season record, counting tonight's finished games before the morning update grades them */
 function seasonRecord() {
   let hit = 0, n = 0;
@@ -492,9 +499,9 @@ function viewSlate() {
       <h1>Every NBA game,<br>called <em>before tipoff.</em></h1>
       <p class="lede">A model that knows who is actually playing. It rates every player on advanced metrics, projects minutes, reads the injury report, and publishes a win probability for each game the morning of.</p>
       <div class="stats">
-        <div class="stat"><b data-count="${games.length}">0</b><span>games ${D.slate.date ? dayLabel(D.slate.date, { weekday: "short" }) : ""}</span></div>
-        <div class="stat"><b data-count="${(D.backtest.overall.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><span>right since ${esc(D.backtest.first)}</span></div>
-        <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span id="season-pct">${rec.n ? `${pct(rec.hit / rec.n, 1)} right this season` : "record this season"}</span></div>
+        <div class="stat"><b data-count="${games.length}">0</b><span>${slateDayLabel()}</span></div>
+        <div class="stat"><b id="season-pct">${rec.n ? pct(rec.hit / rec.n, 1) : "—"}</b><span>right this season</span></div>
+        <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span>record this season</span></div>
       </div>
     </div>
     ${lockCard(currentGames(), viewDay())}

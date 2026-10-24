@@ -153,7 +153,7 @@ function paintTonight() {
   const rec = typeof seasonRecord === "function" ? seasonRecord() : null, recEl = document.getElementById("season-rec");
   if (rec && recEl) {
     recEl.textContent = `${rec.hit}–${rec.n - rec.hit}`;
-    document.getElementById("season-pct").textContent = rec.n ? `${pct(rec.hit / rec.n, 1)} right this season` : "record this season";
+    document.getElementById("season-pct").textContent = rec.n ? pct(rec.hit / rec.n, 1) : "—";
   }
   const split = document.getElementById("split-wrap");
   if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);

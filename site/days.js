@@ -65,7 +65,8 @@ function dayStrip() {
   const days = D.meta.days || [D.slate.date], cur = viewDay(), i = days.indexOf(cur);
   const chip = (d) => {
     const rec = dayRecord(d), today = isToday(d), past = d < D.slate.date;
-    const sub = today ? "today" : rec ? `${rec[0]}–${rec[1] - rec[0]}` : past ? "" : "upcoming";
+    const realToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const sub = today ? (d === realToday ? "today" : "next up") : rec ? `${rec[0]}–${rec[1] - rec[0]}` : past ? "" : "upcoming";
     const [Y, M, Dd] = d.split("-").map(Number), dt = new Date(Y, M - 1, Dd);
     return `<a class="day-chip ${d === cur ? "on" : ""} ${today ? "today" : ""} ${rec ? (rec[0] / rec[1] >= 0.5 ? "good" : "bad") : ""}" href="#/day/${d}">
       <span class="dc-wd">${dt.toLocaleDateString("en-US", { weekday: "short" })}</span><b>${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</b><span class="dc-sub">${sub}</span></a>`;
