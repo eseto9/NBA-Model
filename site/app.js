@@ -201,6 +201,7 @@ function gameCard(g) {
       </div>
       <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
     </div>
+    <div class="live-slot">${typeof liveBlock === "function" ? liveBlock(g) : ""}</div>
     ${marketLine(g)}
     ${scratchNote(g)}
     <div class="outs">${outsLine(g)}</div>
@@ -448,7 +449,7 @@ function viewSlate() {
   ${D.custom ? `<div class="custom-banner card"><span><b>Showing your custom model</b> · ${esc(describe({ ...D.custom }))}</span><a href="#/lab">Edit in Model Lab →</a></div>` : ""}
   <section>
     <div class="section-head">
-      <div><h2>${D.slate.date ? dayLabel(D.slate.date) : "No upcoming games"}</h2><p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
+      <div><h2>${D.slate.date ? dayLabel(D.slate.date) : "No upcoming games"}</h2><div class="tonight" id="tonight"></div><p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
       <div class="chips">
         ${[["all", "All games"], ["locks", "Strong picks"], ["toss", "Close calls"]].map(([k, l]) => `<button class="chip ${state.filter === k ? "on" : ""}" data-filter="${k}">${l}</button>`).join("")}
         <span style="width:8px"></span>
@@ -893,6 +894,7 @@ function render() {
   if (route === "record") bindRolling();
   if (route === "how") renderMath(app);
   if (route === "lab") mountLab();
+  if (!route || route === "game") requestAnimationFrame(() => typeof repaintLive === "function" && repaintLive());
   if (route === "game" && arg) requestAnimationFrame(() => $(`[data-game="${arg}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
@@ -900,6 +902,7 @@ function rerenderGames() {
   const grid = $(".games");
   grid.innerHTML = filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`;
   animateIn(grid);
+  requestAnimationFrame(() => typeof repaintLive === "function" && repaintLive());
 }
 
 document.addEventListener("click", (e) => {
@@ -998,6 +1001,7 @@ load().then(async () => {
   render();
   addEventListener("hashchange", render);
   setInterval(tickCountdown, 1000);
+  if (typeof pollLive === "function") pollLive();
   tickCountdown();
 }).catch((err) => {
   $("#app").innerHTML = `<div class="empty">Couldn't load today's data (${esc(err.message)}).</div>`;

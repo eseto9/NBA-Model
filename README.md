@@ -47,6 +47,12 @@ For past seasons, [tools/hist_odds.py](tools/hist_odds.py) collected the betting
 Point spreads and totals come from the same scoreboard call. They're displayed next to the spread
 implied by the model (normal margin, SD 12) but are never a model input.
 
+## Live scores
+During games the site polls ESPN's scoreboard from the browser ([site/live.js](site/live.js)): every 30 seconds while a
+game is on, every 5 minutes otherwise, and not while the tab is hidden. Cards show the score and clock, and bars slide
+to a live win probability: Brownian motion from the current lead and time left, centred on the pregame expected margin.
+A running tally shows tonight's record.
+
 ## Late scratches
 On the site, open a game and tap a player in either rotation to mark him out, or back in if he's listed as out. The
 browser recomputes both lineups with the model's own formulas and re-prices the game instantly. This is saved in

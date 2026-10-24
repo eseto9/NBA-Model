@@ -121,6 +121,8 @@ function viewMethod() {
   <p>The <b>best value</b> card ranks every side of every game by expected return per $1 at the posted price, using the model's probability:</p>
   $$\text{EV} = p^{\text{model}} \cdot d - 1$$
   <p>A positive EV means the model rates a side above the price on offer. Since the closing line is usually better calibrated than any public model, read it as a disagreement worth checking, not a bet.</p>
+  <p><b>Live win probability.</b> During games the page polls ESPN's scoreboard every 30 seconds. It treats the rest of the game as Brownian motion (Stern, 1994): with lead \(L\) for the home team and fraction \(\tau\) of regulation left, the final margin is normal with mean \(L + \mu_0\tau\) and standard deviation \(\sigma\sqrt{\tau}\), where \(\mu_0 = \sigma\,\Phi^{-1}(p^{\text{pre}})\) is the pregame expected margin and \(\sigma = 12\):</p>
+  $$P(\text{home wins}) = \Phi\!\left(\frac{L + \mu_0\,\tau}{\sigma\sqrt{\tau}}\right)$$
   <p><b>Point spreads</b> come from ESPN's scoreboard (DraftKings) and are shown for reference only. They are never a model input. For comparison, the model's probability is converted to an implied spread, assuming the final margin is normal with standard deviation \(\sigma = 12\) points:</p>
   $$\text{margin}_h = \sigma\,\Phi^{-1}\!\big(p^{\text{model}}_h\big), \qquad \text{spread}_h = -\,\text{margin}_h$$
 
