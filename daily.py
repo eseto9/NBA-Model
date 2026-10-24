@@ -39,13 +39,17 @@ def main(push=True):
             time.sleep(WAIT_MIN * 60)
     else:
         log("some games still not final; publishing anyway")
+    # opening and closing lines for last night's games (closing-line value on the Record page), then
+    # rebuild the site data once more so they show up
+    subprocess.run([sys.executable, "tools/hist_open.py"], cwd=ROOT, capture_output=True)
+    subprocess.run([sys.executable, "export.py", "--no-refresh"], cwd=ROOT, capture_output=True)
     # morning odds snapshot for the slate just published
     o = subprocess.run([sys.executable, "odds.py"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     log(f"odds: {(o.stdout + o.stderr).strip().splitlines()[-1:] or ''}")
     if not push:
         return 0
     subprocess.run([sys.executable, "injuries.py"], cwd=ROOT, capture_output=True)
-    git("add", "site/data", "data/espn", "log/predictions.csv", "log/rankings.csv", "log/odds.csv")
+    git("add", "site/data", "data/espn", "log/predictions.csv", "log/rankings.csv", "log/odds.csv", "data/nba/odds_open.csv.gz")
     if git("diff", "--cached", "--quiet").returncode == 0:
         log("no changes to publish")
         return 0

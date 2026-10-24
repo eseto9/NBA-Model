@@ -894,6 +894,45 @@ function moneyPanel(rec) {
     </div></section>`;
 }
 
+/* closing-line value: between the opening line and tipoff, does the market move toward the model? */
+function seasonClv() {
+  const lean = [], move = [];
+  for (const p of D.record.picks) {
+    if (p.source !== "live" || p.p_open == null || p.p_market == null || p.p_model == null) continue;
+    lean.push(p.p_model - p.p_open); move.push(p.p_market - p.p_open);
+  }
+  return clvStats(lean, move);
+}
+
+function clvStats(lean, move, min = 0.005) {
+  let n = 0, moved = 0, toward = 0, pts = 0;
+  lean.forEach((l, i) => {
+    if (Math.abs(l) < min) return;
+    n++; pts += Math.sign(l) * move[i];
+    if (Math.abs(move[i]) > 1e-9) { moved++; toward += Math.sign(l) === Math.sign(move[i]); }
+  });
+  return { n, moved, toward: moved ? toward / moved : null, pts: n ? (100 * pts) / n : null };
+}
+
+function clvPanel() {
+  const b = D.backtest.clv, live = seasonClv();
+  const bar = (label, x, sub) => x.toward == null ? "" : `<div class="clv-row">
+      <span class="clv-label">${label}<small class="muted">${sub}</small></span>
+      <div class="clv-bar"><i style="width:${pct(x.toward, 1)}" class="${x.toward >= 0.5 ? "up" : "down"}"></i><b class="clv-50"></b></div>
+      <span class="clv-num mono"><b>${pct(x.toward, 0)}</b> toward · ${x.pts >= 0 ? "+" : "−"}${Math.abs(x.pts).toFixed(2)} pts</span></div>`;
+  const leanLabel = (t) => (t ? `Model ${Math.round(t * 100)}+ pts off the open` : "Every game");
+  return `<section class="card panel" style="margin-top:14px">
+    <div class="panel-head"><h3>Does the line move toward the model?</h3><span class="mono muted">closing-line value · 50% means no edge</span></div>
+    <p class="muted clv-intro">From the opening line to tipoff the market takes in injury news and sharp money. If the line keeps moving toward the model's side, the model knew something early. This shows an edge in a few hundred games, long before win-loss records can. To make money betting at the opening line, the move has to beat the book's margin too: about 2.4 pts on a typical line.</p>
+    <div class="clv">
+      <div><span class="mono muted">${esc(D.meta.season)} · published picks</span>
+        ${live.moved ? bar("This season", live, `${live.moved} games where the line moved`) : `<p class="mono muted">Not enough games yet. Picks published on the site start counting once their opening and closing lines are in.</p>`}</div>
+      ${b ? `<div><span class="mono muted">Backtest ${esc(b.first)} to ${esc(b.last)} · ${b.n.toLocaleString()} games · lines move ${b.avg_move} pts on average</span>
+        ${b.all.map((x) => bar(leanLabel(x.lean), x, `${x.moved.toLocaleString()} games`)).join("")}
+        <p class="muted clv-note">Backtest model: team ratings, form and rest only. The full model's past lineups are the players who actually played, which the opening line couldn't know, so including them would fake an edge. This season's picks use the full model, published before tipoff.</p></div>` : ""}
+    </div></section>`;
+}
+
 function moneyChart() {
   const b = D.backtest.betting, pts = b.running, K = b.keys;
   const W = 760, H = 240, m = { l: 66, r: 14, t: 12, b: 28 };
@@ -973,6 +1012,7 @@ function viewRecord() {
     <div class="card big-stat"><span>Market, same games</span><b ${vm.n ? `data-count="${(vm.market.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%"` : ""}>${vm.n ? "0" : "—"}</b><small>${vm.n ? `model ${pct(vm.model.accuracy, 1)} on these ${vm.n.toLocaleString()}` : "no lines"}</small></div>
   </section>
   ${moneyPanel(rec)}
+  ${clvPanel()}
   ${vm.n ? `<section class="card panel vs-strip">
     <div class="vs-head"><span class="mono muted">When the model and the market disagreed on the favorite</span><b>${vm.disagree_n.toLocaleString()} games</b></div>
     <div class="vs-bar"><i style="background:var(--orange)" data-w="${pct(right, 1)}"></i><i style="background:var(--slate)" data-w="${pct(1 - right, 1)}"></i></div>

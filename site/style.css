@@ -545,3 +545,19 @@ td.r, th.r { text-align: right; }
 .sw-model { background: repeating-linear-gradient(90deg, var(--ink-2) 0 5px, transparent 5px 8px); }
 .sw-market { background: var(--slate); }
 @media (max-width: 760px) { .money { grid-template-columns: 1fr; } }
+
+/* closing-line value */
+.clv-intro { font-size: 13px; margin: 0 0 12px; max-width: 760px; }
+.clv { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 24px; align-items: start; }
+.clv-row { display: grid; grid-template-columns: 180px 1fr auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-2); }
+.clv > div:first-child .clv-row { grid-template-columns: 1fr; gap: 6px; }
+.clv-label { display: grid; font-size: 13.5px; }
+.clv-label small { font: 11px var(--mono); }
+.clv-bar { position: relative; height: 10px; border-radius: 999px; background: var(--card-2); }
+.clv-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--slate); }
+.clv-bar i.up { background: var(--good); }
+.clv-bar i.down { background: var(--bad); }
+.clv-50 { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+.clv-num { font-size: 12.5px; white-space: nowrap; }
+.clv-note { font-size: 12px; margin: 10px 0 0; }
+@media (max-width: 760px) { .clv { grid-template-columns: 1fr; } .clv-row { grid-template-columns: 1fr; gap: 6px; } }

@@ -262,7 +262,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 8        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 9        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():
@@ -338,8 +338,73 @@ def backtest_all(g):
     return {"version": BACKTEST_VERSION, "through": nba.season_str(seasons[-1]), "first": nba.season_str(seasons[0]),
             "overall": summary(df.p, df.y), "vs_market": versus_market(df), "seasons": per_season,
             "blend": {"coef": blend_coef, "vs_market": versus_market(blend)},
+            "clv": clv_backtest(played),
             "betting": flat_bets(blend.rename(columns={"p": "p_tipoff"}).merge(df[["date", "home", "away", "p"]], on=["date", "home", "away"])),
             "daily": [[d, int(s), int(c)] for d, s, c in days.values.tolist()]}
+
+
+OPEN_LINES = nba.HIST / "odds_open.csv.gz"
+
+
+def open_lines():
+    """Opening and closing lines (tools/hist_open.py), margin removed: date/home/away, p_open, p_close."""
+    if not OPEN_LINES.exists():
+        return pd.DataFrame(columns=["date", "home", "away", "p_open", "p_close"])
+    o = pd.read_csv(OPEN_LINES).dropna(subset=["home_open", "away_open", "home_close", "away_close"])
+    o["p_open"] = [odds.no_vig(h, a) for h, a in zip(o.home_open, o.away_open)]
+    o["p_close"] = [odds.no_vig(h, a) for h, a in zip(o.home_close, o.away_close)]
+    return o.drop_duplicates(["date", "home", "away"])[["date", "home", "away", "p_open", "p_close"]]
+
+
+CLV_LEANS = (0.0, 0.03, 0.06)            # how far the model is from the opening line
+
+
+def clv_stats(lean, move):
+    """Does the line move toward the model? lean = model - open, move = close - open (home win
+    probability). For each minimum lean: games, share that moved the model's way (of those that
+    moved), and the average move in the model's direction in percentage points."""
+    lean, move = np.asarray(lean, float), np.asarray(move, float)
+    out = []
+    for t in CLV_LEANS:
+        k = np.abs(lean) >= max(t, 0.005)
+        moved = k & (np.abs(move) > 1e-9)
+        toward = (np.sign(lean[moved]) == np.sign(move[moved])).mean() if moved.any() else None
+        pts = 100 * (np.sign(lean[k]) * move[k]).mean() if k.any() else None
+        out.append({"lean": t, "n": int(k.sum()), "moved": int(moved.sum()), "toward": r(toward), "pts": r(pts, 2)})
+    return out
+
+
+def clv_backtest(played):
+    """Closing-line value over the seasons with opening lines. A fair test needs a model that knows
+    only what was known when the line opened, and the backtest's lineups are the players who actually
+    played. So this fits the model without its lineup features (team ratings, form, rest), walk-forward."""
+    lines = open_lines()
+    if lines.empty:
+        return None
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    team_cols = [c for c in nba.features(played.head(1)).columns if c not in nba.LINEUP_FEATURES]
+    rows = []
+    for s in sorted(played.season.unique()):
+        test = played[played.season == s].assign(date=lambda d: d.date.dt.strftime("%Y-%m-%d"))
+        test = test.merge(lines, on=["date", "home", "away"])
+        if not len(test) or s >= nba.current_season():
+            continue
+        train = played[played.season < s]
+        m = make_pipeline(StandardScaler(), LogisticRegression(C=0.03, max_iter=2000))
+        m.fit(nba.features(train)[team_cols], (train.home_pts > train.away_pts).astype(int))
+        p = m.predict_proba(nba.features(test)[team_cols])[:, 1]
+        rows.append(pd.DataFrame({"season": nba.season_str(s), "lean": p - test.p_open.values,
+                                  "move": test.p_close.values - test.p_open.values}))
+        print(f"  closing-line value {nba.season_str(s)}")
+    if not rows:
+        return None
+    d = pd.concat(rows)
+    return {"model": "team ratings, form and rest (no lineups)", "n": int(len(d)), "first": d.season.iloc[0],
+            "last": d.season.iloc[-1], "all": clv_stats(d.lean, d.move),
+            "seasons": [{"season": s, **clv_stats(x.lean, x.move)[1]} for s, x in d.groupby("season")],
+            "avg_move": r(np.abs(d.move).mean() * 100, 2)}
 
 
 def bet_profit(ml, won):
@@ -471,6 +536,7 @@ def main(date=None, refresh=True):
     closing = odds.closing_lines()[keys + ["p_home", "home_ml", "away_ml"]].rename(columns={"p_home": "p_close"})
     espn_lines = historical_market()
     graded = graded.merge(closing, on=keys, how="left").merge(espn_lines, on=keys, how="left")
+    graded = graded.merge(open_lines()[keys + ["p_open"]], on=keys, how="left")
     graded["p_market"] = graded.p_close.fillna(graded.p_market)
     coef = blend_coef()
     if coef:                              # backfilled picks are published the same way: blended where a line existed
@@ -482,7 +548,7 @@ def main(date=None, refresh=True):
     y = (done.home_pts > done.away_pts).astype(int)
     live = done.source == "live"
     picks = [{"date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home), "p_model": r(x.p_model), "source": x.source,
-              "p_market": r(x.p_market), "ml": None if pd.isna(x.home_ml) else [int(x.away_ml), int(x.home_ml)],
+              "p_market": r(x.p_market), "p_open": r(x.p_open), "ml": None if pd.isna(x.home_ml) else [int(x.away_ml), int(x.home_ml)],
               "score": None if pd.isna(x.home_pts) else [int(x.away_pts), int(x.home_pts)]}
              for x in graded.itertuples()]
     vs = lambda d, yy: versus_market(pd.DataFrame({"p": d.p_home.values, "p_market": d.p_market.values, "y": yy.values}))
