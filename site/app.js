@@ -179,7 +179,11 @@ function marketLine(g) {
   const sp = g.spread ? ` · <span title="${esc(g.spread.provider || "")} spread and total, display only">${esc(g.spread.text)}${g.spread.total ? `, O/U ${g.spread.total}` : ""}</span>` : "";
   if (!m) return `<div class="mkt-line muted">${g.spread ? `Spread ${esc(g.spread.text)}${g.spread.total ? `, O/U ${g.spread.total}` : ""}` : "Betting line not posted yet"}</div>`;
   const fav = m.p_home >= 0.5 ? g.home.abbr : g.away.abbr;
-  return `<div class="mkt-line"><span class="mkt-dot"></span>Market <b>${esc(fav)} ${pct(Math.max(m.p_home, 1 - m.p_home))}</b>
+  // how far Tipoff's number is from the market's, on the market's favorite
+  const gap = Math.round(100 * (m.p_home >= 0.5 ? g.p_home - m.p_home : m.p_home - g.p_home));
+  const cmp = Math.abs(gap) < 1 ? `<span class="mkt-cmp">same as Tipoff</span>`
+    : `<span class="mkt-cmp">Tipoff ${gap > 0 ? "+" : "−"}${Math.abs(gap)} on ${esc(fav)}</span>`;
+  return `<div class="mkt-line">Market <b>${esc(fav)} ${pct(Math.max(m.p_home, 1 - m.p_home))}</b>${cmp}
     <span class="muted">${m.home_ml != null ? `${esc(g.away.abbr)} ${ml(m.away_ml)} · ${esc(g.home.abbr)} ${ml(m.home_ml)}` : ""}${sp}</span></div>`;
 }
 
@@ -212,9 +216,8 @@ function gameCard(g) {
         <div class="tug-bar" role="img" aria-label="${esc(g.away.abbr)} ${pct(pa)}, ${esc(g.home.abbr)} ${pct(g.p_home)}">
           <i style="background:${esc(awayColor)}" data-flex="calc(${pct(pa, 1)} - 1px)"></i><i style="background:${esc(g.home.color)}" data-flex="calc(${pct(g.p_home, 1)} - 1px)"></i>
 </div>
-        ${g.market && !(g.live && g.live.state !== "pre") ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${esc(g.market.provider || "DraftKings")} via ESPN, margin removed"></span>` : ""}
       </div>
-      <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="tug-cap">${g.live && g.live.state === "post" ? "pregame" : ""}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
+      <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="tug-cap">${g.live && g.live.state === "post" ? "pregame" : "Tipoff"}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
     </div>
     <div class="live-slot">${typeof liveBlock === "function" ? liveBlock(g) : ""}</div>
     ${marketLine(g)}
@@ -546,7 +549,7 @@ function viewSlate() {
   <section id="slate">
     ${typeof dayStrip === "function" ? dayStrip() : ""}
     <div class="section-head">
-      <div><h2>${viewDay() ? dayLabel(viewDay()) : "No upcoming games"}</h2>${isToday(viewDay()) ? `<div class="tonight" id="tonight"></div>` : dayHeading(viewDay(), currentGames())}<p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
+      <div><h2>${viewDay() ? dayLabel(viewDay()) : "No upcoming games"}</h2>${isToday(viewDay()) ? `<div class="tonight" id="tonight"></div>` : dayHeading(viewDay(), currentGames())}<p>Bars show Tipoff's win probability for each team, with the betting market underneath. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
       <div class="chips">
         ${[["all", "All games"], ["locks", "Strong picks"], ["toss", "Close calls"]].map(([k, l]) => `<button class="chip ${state.filter === k ? "on" : ""}" data-filter="${k}">${l}</button>`).join("")}
         <span style="width:8px"></span>

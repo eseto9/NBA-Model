@@ -522,3 +522,6 @@ td.r, th.r { text-align: right; }
 .fc-sub b { color: var(--ink-2); font-weight: 500; }
 .compact-final.open { grid-template-columns: none; }
 .game.open > :not(.detail) { cursor: pointer; }
+
+/* market under the bar: text, not a second mark on the bar */
+.mkt-cmp { padding: 1px 7px; border-radius: 6px; background: var(--card-2); color: var(--ink-2); }
