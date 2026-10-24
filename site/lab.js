@@ -178,9 +178,14 @@ function runModel(cfg, d, onProgress) {
       season: d.season, y: d.y, elo: d.elo, names, cols: names.map((n) => d.X[n]),
       slate: d.slate ? { cols: names.map((n) => d.slate.X[n]), elo: d.slate.elo_prob } : null,
     };
-    if (LAB.worker) LAB.worker.terminate();
+    if (LAB.worker) { LAB.worker.terminate(); if (LAB.cancel) LAB.cancel(null); }   // a newer run supersedes it
+    LAB.cancel = resolve;
     LAB.worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: "text/javascript" })));
-    LAB.worker.onmessage = (ev) => (ev.data.done ? resolve(ev.data) : onProgress && onProgress(ev.data));
+    LAB.worker.onmessage = (ev) => {
+      if (!ev.data.done) return onProgress && onProgress(ev.data);
+      LAB.cancel = null;
+      resolve(ev.data);
+    };
     LAB.worker.postMessage({ cfg, D: payload });
   });
 }
@@ -251,8 +256,8 @@ function controlsHTML(cfg, d) {
       ${d.unavailable.map((u) => `<label class="lab-check off" title="${esc(u.why)}"><input type="checkbox" disabled><span><b>${esc(u.label)}</b> <span class="tag">unavailable</span><small>${esc(u.why)}</small></span></label>`).join("")}
     </div>
     <div class="lab-actions">
-      <button class="btn primary" id="lab-run">Run backtest</button>
       <button class="btn" id="lab-reset">Reset to default</button>
+      <span class="lab-hint" style="margin:0;align-self:center">Updates as you change anything.</span>
     </div>
     <label class="lab-check use-today"><input type="checkbox" id="lab-use" ${cfg.useOnToday ? "checked" : ""}><span><b>Use my model on the Today page</b><small>Saved in this browser only.</small></span></label>`;
 }
@@ -341,19 +346,38 @@ function renderResults(res, def, d) {
   if (window.renderMathInElement) renderMath($("#lab-results"));
 }
 
+/* every change reruns the backtest: changes during a run cancel it, and finished configurations are cached */
+let LAB_RUN = 0;
+function scheduleRun(delay) {
+  clearTimeout(LAB.debounce);
+  LAB.debounce = setTimeout(labRun, delay);
+}
+const cfgKey = (cfg) => JSON.stringify({ ...cfg, useOnToday: undefined, groups: cfg.model === "elo" ? [] : [...cfg.groups].sort(),
+  ...(cfg.model === "gbm" ? { C: undefined } : { trees: undefined, depth: undefined, lr: undefined, minLeaf: undefined }) });
+
 async function labRun() {
-  if (LAB.running) return;
-  LAB.running = true;
-  const d = LAB.data, cfg = LAB.config;
-  saveConfig(cfg);
-  const bar = (p, label) => ($("#lab-summary").innerHTML = `<div class="label">${esc(describe(cfg))}</div>
+  const token = ++LAB_RUN, d = LAB.data, cfg = { ...LAB.config };
+  saveConfig(LAB.config);
+  LAB.results = LAB.results || {};
+  const bar = (p, label) => token === LAB_RUN && ($("#lab-summary").innerHTML = `<div class="label">${esc(describe(cfg))}</div>
     <div class="lab-progress"><i style="width:${(p * 100).toFixed(0)}%"></i></div><span class="mono" style="opacity:.75">${label}</span>`);
-  bar(0, "Fitting the default model…");
-  if (!LAB.defaultResult) LAB.defaultResult = await runModel(defaultConfig(d), d, (m) => bar(m.progress * 0.3, `Default model: ${seasonLabel(m.season)}`));
-  const res = isDefault(cfg, d) ? LAB.defaultResult : await runModel(cfg, d, (m) => bar(0.3 + m.progress * 0.7, `Your model: backtesting ${seasonLabel(m.season)}`));
+  $("#lab-results").classList.add("stale");
+  if (!LAB.defaultResult) {
+    bar(0, "Fitting the default model…");
+    const r = await runModel(defaultConfig(d), d, (m) => bar(m.progress * 0.3, `Default model: ${seasonLabel(m.season)}`));
+    if (!r || token !== LAB_RUN) return;
+    LAB.defaultResult = LAB.results[cfgKey(defaultConfig(d))] = r;
+  }
+  let res = LAB.results[cfgKey(cfg)];
+  if (!res) {
+    bar(0.3, "Backtesting your model…");
+    res = await runModel(cfg, d, (m) => bar(0.3 + m.progress * 0.7, `Your model: backtesting ${seasonLabel(m.season)}`));
+    if (!res || token !== LAB_RUN) return;
+    LAB.results[cfgKey(cfg)] = res;
+  }
   LAB.result = res;
+  $("#lab-results").classList.remove("stale");
   renderResults({ ...res }, { ...LAB.defaultResult }, d);
-  LAB.running = false;
 }
 
 async function mountLab() {
@@ -369,9 +393,8 @@ document.addEventListener("click", (e) => {
   const t = e.target;
   if (!LAB.data || !t.closest("#lab-controls")) return;
   const m = t.closest("[data-model]");
-  if (m) { LAB.config.model = m.dataset.model; labControlsChanged(); return; }
-  if (t.id === "lab-run") labRun();
-  if (t.id === "lab-reset") { LAB.config = { ...defaultConfig(LAB.data), useOnToday: LAB.config.useOnToday }; labControlsChanged(); labRun(); }
+  if (m) { LAB.config.model = m.dataset.model; labControlsChanged(); scheduleRun(0); return; }
+  if (t.id === "lab-reset") { LAB.config = { ...defaultConfig(LAB.data), useOnToday: LAB.config.useOnToday }; labControlsChanged(); scheduleRun(0); }
 });
 document.addEventListener("input", (e) => {
   const t = e.target;
@@ -380,10 +403,12 @@ document.addEventListener("input", (e) => {
     const k = t.dataset.cfg, v = +t.value;
     if (k === "logC") { LAB.config.C = +(10 ** v).toPrecision(2); $("#v-logC").textContent = LAB.config.C; }
     else { LAB.config[k] = v; $(`#v-${k}`).textContent = k === "lr" ? v.toFixed(2) : v; }
+    scheduleRun(400);                    // wait for the slider to settle
   }
   if (t.dataset.group) {
     const g = t.dataset.group;
     LAB.config.groups = t.checked ? [...new Set([...LAB.config.groups, g])] : LAB.config.groups.filter((x) => x !== g);
+    scheduleRun(150);
   }
   if (t.id === "lab-use") { LAB.config.useOnToday = t.checked; saveConfig(LAB.config); }
 });

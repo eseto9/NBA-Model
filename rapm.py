@@ -24,6 +24,7 @@ import players
 LAMBDA = 1000.0          # ridge strength, in possessions (tools/tune_rapm.py)
 HALFLIFE_DAYS = 730      # weight of older stints halves every two years
 WINDOW_SEASONS = 3       # this season plus the two before it
+PRIOR_K = 1.0            # shrink toward k x box-score impact (Tipoff Impact) instead of zero (tools/improve.py)
 HOME = "__home__"
 
 
@@ -134,10 +135,17 @@ def stints_ready():
     return _cache["st"]
 
 
-def monthly_cached(st, dates, keep_before):
+def box_prior(pg, asof):
+    """Each player's credibility-weighted Tipoff Impact before `asof`, centred, times PRIOR_K:
+    what RAPM shrinks toward, so a player with few stints sits near his box-score value."""
+    last = pg[pg.GAME_DATE < asof].sort_values("GAME_DATE").groupby("PLAYER_ID").post_tpi.last()
+    return (PRIOR_K * (last - last.mean())).to_dict() if len(last) else {}
+
+
+def monthly_cached(st, dates, keep_before, pg=None):
     """Monthly walk-forward ratings. Months before `keep_before` (the current season) never change,
     so they are cached in data/nba/rapm_monthly.csv.gz and only this season's months are refit."""
-    path, version = nba.HIST / "rapm_monthly.csv.gz", f"{LAMBDA}|{HALFLIFE_DAYS}|{WINDOW_SEASONS}"
+    path, version = nba.HIST / "rapm_monthly.csv.gz", f"{LAMBDA}|{HALFLIFE_DAYS}|{WINDOW_SEASONS}|prior{PRIOR_K if pg is not None else 0}"
     cache = {}
     if path.exists():
         c = pd.read_csv(path, dtype={"player": str})
@@ -148,7 +156,7 @@ def monthly_cached(st, dates, keep_before):
     for m in months:
         r = cache.get(m)
         if r is None:
-            r = fit(st, m)
+            r = fit(st, m, prior=box_prior(pg, m) if pg is not None else None)
             fresh = fresh or (bool(r) and m < keep_before)
         if r:
             out[m] = prev = r
@@ -179,11 +187,12 @@ def lineup_rapm(rows, monthly):
 
 def history(pg, st, keep_before=None):
     """Lineup RAPM for every past game, from the players who played and monthly walk-forward fits."""
-    monthly = monthly_cached(st, pg.GAME_DATE, keep_before or pd.Timestamp.max) if keep_before is not None else monthly_ratings(st, pg.GAME_DATE)
+    monthly = monthly_cached(st, pg.GAME_DATE, keep_before, pg) if keep_before is not None else monthly_ratings(st, pg.GAME_DATE)
     rows = pg.rename(columns={"GAME_ID": "game_id", "TEAM_ID": "team_id", "GAME_DATE": "date"}).assign(avail=1.0)
     return lineup_rapm(rows, monthly), monthly
 
 
-def latest(st):
+def latest(st, pg=None):
     """Ratings from every stint so far, for pricing upcoming games."""
-    return fit(st, pd.Timestamp.now().normalize() + pd.Timedelta(days=1))
+    asof = pd.Timestamp.now().normalize() + pd.Timedelta(days=1)
+    return fit(st, asof, prior=box_prior(pg, asof) if pg is not None else None)

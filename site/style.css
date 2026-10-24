@@ -432,3 +432,18 @@ td.r, th.r { text-align: right; }
 .day-note { display: block; margin-top: 6px; font: 12px var(--mono); color: var(--muted); }
 .game.lite { cursor: default; }
 .game.lite .expand-hint { display: none; }
+.lab-results.stale { opacity: .55; transition: opacity .2s; }
+.tug-nums { align-items: baseline; }
+.tug-cap { font: 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.game.is-final .tug-bar { opacity: .5; filter: saturate(.7); }
+.game.is-final .tug-nums span:not(.tug-cap) { font-size: 16px; color: var(--muted); }
+/* finished games: right or wrong at a glance */
+.game.is-final.call-hit { border-color: var(--good); box-shadow: inset 5px 0 0 var(--good), var(--shadow); }
+.game.is-final.call-miss { border-color: var(--bad); box-shadow: inset 5px 0 0 var(--bad), var(--shadow); }
+.live.post.call-hit { background: color-mix(in srgb, var(--good) 14%, var(--card)); }
+.live.post.call-miss { background: color-mix(in srgb, var(--bad) 12%, var(--card)); }
+.verdict { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px 6px 6px; border-radius: 999px; color: #fff; font: 700 13px var(--font); letter-spacing: .01em; }
+.verdict i { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, .25); font-style: normal; font-size: 13px; }
+.verdict.v-hit { background: var(--good); }
+.verdict.v-miss { background: var(--bad); }
+.verdict { animation: pop .45s cubic-bezier(.3, 1.6, .5, 1) both; }

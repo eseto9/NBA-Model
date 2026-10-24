@@ -184,13 +184,13 @@ function marketLine(g) {
   if (!m) return `<div class="mkt-line muted">${g.spread ? `Spread ${esc(g.spread.text)}${g.spread.total ? `, O/U ${g.spread.total}` : ""}` : "Betting line not posted yet"}</div>`;
   const fav = m.p_home >= 0.5 ? g.home.abbr : g.away.abbr;
   return `<div class="mkt-line"><span class="mkt-dot"></span>Market <b>${esc(fav)} ${pct(Math.max(m.p_home, 1 - m.p_home))}</b>
-    <span class="muted">${esc(g.away.abbr)} ${ml(m.away_ml)} · ${esc(g.home.abbr)} ${ml(m.home_ml)}${sp}</span></div>`;
+    <span class="muted">${m.home_ml != null ? `${esc(g.away.abbr)} ${ml(m.away_ml)} · ${esc(g.home.abbr)} ${ml(m.home_ml)}` : ""}${sp}</span></div>`;
 }
 
 function gameCard(g) {
   const pa = 1 - g.p_home, open = state.open === g.id;
   const awayColor = colorsClash(g.away.color, g.home.color) ? "#8a857b" : g.away.color;
-  return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""}" data-game="${g.id}">
+  return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""} ${g.live && g.live.state === "post" ? `is-final ${(g.live.hs > g.live.as) === (g.p_home >= 0.5) ? "call-hit" : "call-miss"}` : ""}" data-game="${g.id}">
     <div class="game-top"><span class="mono muted">${g.lite ? "" : tipLabel(g.tip)}</span><span>${gameTags(g)}</span></div>
     <div class="matchup">${teamBlock(g.away, "away", g.pick === g.away.abbr)}<span class="at">@</span>${teamBlock(g.home, "home", g.pick === g.home.abbr)}</div>
     <div class="tug">
@@ -200,7 +200,7 @@ function gameCard(g) {
           <span class="tug-mid"></span></div>
         ${g.market ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${esc(g.market.provider || "DraftKings")} via ESPN, margin removed"></span>` : ""}
       </div>
-      <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
+      <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="tug-cap">${g.live && g.live.state === "post" ? "pregame" : ""}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
     </div>
     <div class="live-slot">${typeof liveBlock === "function" ? liveBlock(g) : ""}</div>
     ${marketLine(g)}
@@ -853,7 +853,7 @@ function cumulativeChart(picks) {
 /* one pick: matchup, confidence bar with the market marked on it, score, result */
 function pickCard(p) {
   const side = pickSide(p), c = pickConf(p), mk = mktFor(p);
-  const res = !p.score ? `<span class="res pend">pending</span>` : isHit(p) ? `<span class="res hit">✓ Right</span>` : `<span class="res miss">✗ Wrong</span>`;
+  const res = !p.score ? `<span class="res pend">pending</span>` : isHit(p) ? `<span class="verdict v-hit"><i>✓</i>Called it</span>` : `<span class="verdict v-miss"><i>✗</i>Missed</span>`;
   const winner = p.score ? (p.score[1] > p.score[0] ? p.home : p.away) : null;
   const score = p.score ? `<span class="${winner === p.away ? "w" : ""}">${esc(p.away)} ${p.score[0]}</span> – <span class="${winner === p.home ? "w" : ""}">${p.score[1]} ${esc(p.home)}</span>` : "";
   return `<div class="pick ${!p.score ? "" : isHit(p) ? "is-hit" : "is-miss"}">

@@ -70,7 +70,10 @@ SCHED = ["x_travel", "x_tz", "x_dense", "x_load7", "x_altitude"]   # round2 adds
 
 
 def design(d, cols, market_input):
-    X = nba.lab_features(d).assign(d_lu_rapm=d.d_lu_rapm.fillna(0).values if "d_lu_rapm" in d else 0)[cols]
+    X = nba.lab_features(d)                    # d_lu_rapm comes from lu_rapm_h/a like every lineup feature
+    if "d_lu_rapm" in d:                       # an explicitly supplied variant overrides it
+        X["d_lu_rapm"] = d.d_lu_rapm.fillna(0).values
+    X = X[cols]
     if market_input:
         X = X.assign(mkt_logit=np.log(d.p_market / (1 - d.p_market)))
     return X

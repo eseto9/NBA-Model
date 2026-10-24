@@ -231,7 +231,7 @@ def summary(p, y):
             "calibration": calibration(p, y)}
 
 
-BACKTEST_VERSION = 6        # bump when the model changes, to recompute the backtest
+BACKTEST_VERSION = 7        # bump when the model changes, to recompute the backtest
 
 
 def historical_market():
@@ -327,12 +327,8 @@ LAB_GROUPS = [   # key, label, features, on by default, description
     ("massey", "Massey ratings", ["x_massey"], False, "Opponent-adjusted team ratings: recency-weighted ridge regression of every margin on team indicators."),
     ("travel", "Travel & schedule density", ["x_travel", "x_tz", "x_dense", "x_load7", "x_altitude"], False, "Distance since the last game, time-zone shift, 3-in-4 nights, games in 7 days, Denver/Utah altitude."),
 ]
-LAB_UNAVAILABLE = [
-    ("LEBRON", "BBall Index's tracking-based plus-minus. Proprietary and paywalled, no free daily feed."),
-    ("VORP", "Volume stat (BPM x minutes share). Minutes are already modeled through expected minutes and availability."),
-    ("Win Shares", "Cumulative, and its defensive half is mostly team defense, which Elo and form already carry."),
-]
-LAB_VERSION = 3
+LAB_UNAVAILABLE = []      # LEBRON, VORP and Win Shares can't be built from free data; see Methodology
+LAB_VERSION = 5
 
 
 def lab_columns(rows, X, market):
@@ -355,7 +351,7 @@ def write_lab(hist, slate, season):
     meta = {"version": LAB_VERSION, "season": season,
             "groups": [{"key": k, "label": l, "features": f, "default": d, "desc": t} for k, l, f, d, t in LAB_GROUPS],
             "unavailable": [{"label": l, "why": w} for l, w in LAB_UNAVAILABLE],
-            "default": {"model": "logistic", "C": 0.1, "groups": [k for k, _, _, d, _ in LAB_GROUPS if d]}}
+            "default": {"model": "logistic", "C": 0.03, "groups": [k for k, _, _, d, _ in LAB_GROUPS if d]}}
     path = SITE / "lab_hist.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     if old.get("version") != LAB_VERSION or old.get("season") != season:

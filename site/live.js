@@ -95,11 +95,11 @@ function liveBlock(g) {
   if (!x || x.state === "pre") return "";
   const hit = x.state === "post" ? ((x.hs > x.as) === (g.p_home >= 0.5)) : null;
   const leadA = x.as > x.hs, leadH = x.hs > x.as;
-  return `<div class="live ${x.state}">
+  return `<div class="live ${x.state} ${hit == null ? "" : hit ? "call-hit" : "call-miss"}">
     <span class="live-tag">${x.state === "in" ? `<i class="live-dot"></i>LIVE · ${esc(x.detail)}` : `FINAL${x.period > 4 ? ` / ${x.period - 4 > 1 ? x.period - 4 : ""}OT` : ""}`}</span>
     <span class="live-score"><b class="${leadA ? "lead" : ""}">${esc(g.away.abbr)} ${x.as}</b><span class="muted">–</span><b class="${leadH ? "lead" : ""}">${x.hs} ${esc(g.home.abbr)}</b></span>
     ${hit == null ? `<span class="mono live-pre">pregame ${esc(g.p_home >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(g.p_home, 1 - g.p_home))}</span>`
-      : `<span class="res ${hit ? "hit" : "miss"}">${hit ? "✓ Right" : "✗ Wrong"}</span>`}
+      : `<span class="verdict ${hit ? "v-hit" : "v-miss"}"><i>${hit ? "✓" : "✗"}</i>${hit ? "Called it" : "Missed"}</span>`}
     ${liveSpark(g)}
   </div>`;
 }
@@ -122,19 +122,25 @@ function paintLive(g) {
   const slot = card.querySelector(".live-slot");
   if (slot) slot.innerHTML = liveBlock(g);
   if (!g.live || g.live.state === "pre" || g.live.p == null) return;
-  const p = g.live.p, bars = card.querySelectorAll(".tug-bar i"), nums = card.querySelectorAll(".tug-nums span");
+  // once a game is over the bars go back to what was predicted; the score panel shows what happened
+  const p = g.live.state === "post" ? g.p_home : g.live.p, bars = card.querySelectorAll(".tug-bar i"), nums = card.querySelectorAll(".tug-nums span:not(.tug-cap)");
   if (bars.length === 2) {
     bars[0].style.flexBasis = `calc(${pct(1 - p, 1)} - 1px)`;
     bars[1].style.flexBasis = `calc(${pct(p, 1)} - 1px)`;
   }
   // not 100% until the buzzer
   const show = (q) => (g.live.state === "post" ? pct(q) : q > 0.995 ? ">99%" : q < 0.005 ? "<1%" : pct(q));
+  const cap = card.querySelector(".tug-cap");
+  if (cap) cap.textContent = g.live.state === "post" ? "pregame" : "live";
   if (nums.length === 2) {
     nums[0].textContent = show(1 - p); nums[0].className = p > 0.5 ? "lose" : "";
     nums[1].textContent = show(p); nums[1].className = p < 0.5 ? "lose" : "";
   }
   card.classList.toggle("is-live", g.live.state === "in");
   card.classList.toggle("is-final", g.live.state === "post");
+  const hit = g.live.state === "post" ? (g.live.hs > g.live.as) === (g.p_home >= 0.5) : null;
+  card.classList.toggle("call-hit", hit === true);
+  card.classList.toggle("call-miss", hit === false);
 }
 
 function paintTonight() {

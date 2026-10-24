@@ -311,7 +311,7 @@ def features(g):
 
 def make_models():
     return {
-        "logistic": make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=1000)),
+        "logistic": make_pipeline(StandardScaler(), LogisticRegression(C=0.03, max_iter=2000)),
         "gbm": HistGradientBoostingClassifier(max_iter=300, learning_rate=0.03, max_depth=3,
                                               min_samples_leaf=100, l2_regularization=1.0),
     }
@@ -393,7 +393,7 @@ def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     lineups, roster = players.upcoming_lineups(unplayed, roster, latest, priors)
     # RAPM for upcoming games: ratings from every stint so far, same availability weights
     import rapm
-    now = rapm.latest(rapm.stints_ready())
+    now = rapm.latest(rapm.stints_ready(), rated[0])
     roster["r_rapm"] = roster.PLAYER_ID.map(now).fillna(rapm.REPLACEMENT)
     sides = pd.concat([unplayed[["game_id", f"{s}_id"]].rename(columns={f"{s}_id": "team_id"}) for s in ("home", "away")])
     rows = sides.merge(roster, on="team_id").assign(date=pd.Timestamp.now().normalize())
