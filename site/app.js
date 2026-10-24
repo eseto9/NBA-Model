@@ -151,8 +151,8 @@ function gameTags(g) {
   if (c >= 0.75) tags.push(`<span class="tag hot">Lock</span>`);
   else if (c < 0.56) tags.push(`<span class="tag toss">Toss-up</span>`);
   const e = edge(g);
-  if (e && e.pts >= 5) tags.push(`<span class="tag edge" title="The model gives ${esc(e.team)} ${e.pts.toFixed(1)} points more than the betting market">Edge ${esc(e.team)} +${e.pts.toFixed(0)}</span>`);
-  else if ((g.p_home - 0.5) * (g.p_elo - 0.5) < 0) tags.push(`<span class="tag">Model ≠ Elo</span>`);
+  if (disagrees(g)) tags.push(`<span class="tag split" title="The model and the betting market pick different winners">Model ≠ market</span>`);
+  if (e && e.pts >= 5) tags.push(`<span class="tag edge" title="The model rates ${esc(e.team)} ${e.pts.toFixed(1)} percentage points more likely to win than the betting market does">Model +${e.pts.toFixed(0)}% on ${esc(e.team)}</span>`);
   if (g.neutral) tags.push(`<span class="tag">Neutral site</span>`);
   return tags.join(" ");
 }
@@ -187,17 +187,20 @@ function marketLine(g) {
     <span class="muted">${m.home_ml != null ? `${esc(g.away.abbr)} ${ml(m.away_ml)} · ${esc(g.home.abbr)} ${ml(m.home_ml)}` : ""}${sp}</span></div>`;
 }
 
+/* the model and the market pick different winners */
+const disagrees = (g) => !!g.market && (g.p_home >= 0.5) !== (g.market.p_home >= 0.5);
+
 function gameCard(g) {
   const pa = 1 - g.p_home, open = state.open === g.id;
   const awayColor = colorsClash(g.away.color, g.home.color) ? "#8a857b" : g.away.color;
-  return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""} ${g.live && g.live.state === "post" ? `is-final ${(g.live.hs > g.live.as) === (g.p_home >= 0.5) ? "call-hit" : "call-miss"}` : ""}" data-game="${g.id}">
+  return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""} ${g.live && g.live.state === "post" ? `is-final ${(g.live.hs > g.live.as) === (g.p_home >= 0.5) ? "call-hit" : "call-miss"}` : ""} ${disagrees(g) ? "disagree" : ""}" data-game="${g.id}">
     <div class="game-top"><span class="mono muted">${g.lite ? "" : tipLabel(g.tip)}</span><span>${gameTags(g)}</span></div>
     <div class="matchup">${teamBlock(g.away, "away", g.pick === g.away.abbr)}<span class="at">@</span>${teamBlock(g.home, "home", g.pick === g.home.abbr)}</div>
     <div class="tug">
       <div class="tug-wrap">
         <div class="tug-bar" role="img" aria-label="${esc(g.away.abbr)} ${pct(pa)}, ${esc(g.home.abbr)} ${pct(g.p_home)}">
           <i style="background:${esc(awayColor)}" data-flex="calc(${pct(pa, 1)} - 1px)"></i><i style="background:${esc(g.home.color)}" data-flex="calc(${pct(g.p_home, 1)} - 1px)"></i>
-          <span class="tug-mid"></span></div>
+</div>
         ${g.market ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${esc(g.market.provider || "DraftKings")} via ESPN, margin removed"></span>` : ""}
       </div>
       <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="tug-cap">${g.live && g.live.state === "post" ? "pregame" : ""}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
@@ -369,6 +372,7 @@ function bestValue(games) {
   for (const g of games) {
     if (!g.market) continue;
     for (const [side, p, price, pm] of [[g.home, g.p_home, g.market.home_best, g.market.p_home], [g.away, 1 - g.p_home, g.market.away_best, 1 - g.market.p_home]]) {
+      if (price == null) continue;
       const dec = price > 0 ? 1 + price / 100 : 1 + 100 / -price;
       const ev = p * dec - 1;
       if (!best || ev > best.ev) best = { g, side, p, pm, price, ev };
@@ -377,8 +381,8 @@ function bestValue(games) {
   return best;
 }
 
-function lockCard(games) {
-  if (!games.length) return `<div class="lock"><div class="label">No games scheduled</div><p>Check back on the next game day.</p></div>`;
+function lockCard(games, day = D.slate.date) {
+  if (!games || !games.length) return `<div class="lock"><div class="label">No games ${games ? "scheduled" : "loaded yet"}</div><p>Pick another day.</p></div>`;
   const conf = games.reduce((a, b) => (confidence(b) > confidence(a) ? b : a));
   const v = bestValue(games);
   const useValue = v && v.ev > 0;
@@ -387,10 +391,10 @@ function lockCard(games) {
   const c = useValue ? v.p : confidence(g);
   const R = 56, C = 2 * Math.PI * R;
   const first = games.map((x) => x.tip).filter(Boolean).sort()[0];
-  const label = useValue ? "Best value vs the odds" : v ? "Strongest pick · no edge on the market today" : "Strongest pick · odds not posted yet";
+  const label = useValue ? "Best value vs the odds" : v ? "Strongest pick · no edge on the market" : isToday(day) ? "Strongest pick · odds not posted yet" : "Strongest pick";
   const confSide = conf.p_home >= 0.5 ? conf.home : conf.away;
   return `<div class="lock">
-    <div class="label">${label} · ${dayLabel(D.slate.date, { weekday: "short", month: "short", day: "numeric" })}</div>
+    <div class="label">${label} · ${dayLabel(day, { weekday: "short", month: "short", day: "numeric" })}</div>
     <div class="lock-body">
       <div class="gauge"><svg viewBox="0 0 132 132" width="132" height="132">
         <circle cx="66" cy="66" r="${R}" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="11"/>
@@ -400,14 +404,60 @@ function lockCard(games) {
         <div class="gauge-val"><div><b data-count="${(c * 100).toFixed(0)}" data-suf="%">0%</b><small>${useValue ? "model" : "to win"}</small></div></div></div>
       <div>${useValue ? `<div class="lock-position">Bet: ${esc(side.abbr)} moneyline ${ml(v.price)}</div>` : ""}
         <div class="lock-team">${esc(side.name)}${useValue ? " to win" : ""}</div>
-        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)} · ${tipLabel(g.tip)}</div>
+        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)}${g.tip ? ` · ${tipLabel(g.tip)}` : ""}</div>
         ${useValue ? `<div class="lock-ev"><b>+${(v.ev * 100).toFixed(1)}¢</b> expected per $1 staked</div>
           <div class="lock-sub">$100 at ${ml(v.price)} returns $${(100 * payout(v.price)).toFixed(0)} profit if ${esc(side.abbr)} win<br>
           needs ${pct(1 / (1 + payout(v.price)), 1)} to break even · model ${pct(v.p)} <span style="color:var(--orange)">●</span> · market ${pct(v.pm)} <span style="color:var(--slate)">●</span></div>` : ""}</div>
     </div>
-    ${useValue ? `<div class="lock-row"><span>Most likely winner</span><a href="#/game/${conf.id}">${esc(confSide.abbr)} ${pct(confidence(conf))} · ${esc(conf.away.abbr)} @ ${esc(conf.home.abbr)}</a></div>` : ""}
-    <div class="lock-row" ${useValue ? 'style="border:0;padding-top:8px"' : ""}><span>Open this game</span><a href="#/game/${g.id}">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} →</a></div>
-    <div class="lock-row" style="border:0;padding-top:8px"><span>First tip</span><span class="countdown" data-tip-at="${esc(first || "")}">${tipLabel(first)}</span></div>
+    ${lockResult(g, side, useValue ? v.price : null)}
+    ${useValue ? `<div class="lock-row"><span>Most likely winner</span><a href="${isToday(day) ? `#/game/${conf.id}` : `#/day/${day}`}">${esc(confSide.abbr)} ${pct(confidence(conf))} · ${esc(conf.away.abbr)} @ ${esc(conf.home.abbr)}${resultMark(conf, confSide)}</a></div>` : ""}
+    ${isToday(day) ? `<div class="lock-row" ${useValue ? 'style="border:0;padding-top:8px"' : ""}><span>Open this game</span><a href="#/game/${g.id}">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} →</a></div>
+    <div class="lock-row" style="border:0;padding-top:8px"><span>First tip</span><span class="countdown" data-tip-at="${esc(first || "")}">${tipLabel(first)}</span></div>` : ""}
+  </div>`;
+}
+
+/* how a pick turned out: winner of a finished game, or null */
+const winnerOf = (g) => (g.live && g.live.state === "post" ? (g.live.hs > g.live.as ? g.home.abbr : g.away.abbr) : null);
+const resultMark = (g, side) => (winnerOf(g) ? (winnerOf(g) === side.abbr ? " ✓" : " ✗") : "");
+
+function lockResult(g, side, price) {
+  const w = winnerOf(g);
+  if (!w) return "";
+  const won = w === side.abbr;
+  const money = price == null ? "" : won ? ` · +$${(100 * payout(price)).toFixed(0)} on $100` : " · −$100";
+  return `<div class="lock-result ${won ? "won" : "lost"}"><i>${won ? "✓" : "✗"}</i>${won ? (price == null ? "Called it" : "Bet won") : (price == null ? "Missed" : "Bet lost")}${money}
+    <span>final ${esc(g.away.abbr)} ${g.live.as} – ${g.live.hs} ${esc(g.home.abbr)}</span></div>`;
+}
+
+/* season record, counting tonight's finished games before the morning update grades them */
+function seasonRecord() {
+  let hit = 0, n = 0;
+  const graded = new Set();
+  for (const p of D.record.picks) if (p.score) { n++; hit += isHit(p); graded.add(`${p.date}|${p.away}|${p.home}`); }
+  for (const g of D.slate.games) {
+    if (!g.live || g.live.state !== "post" || graded.has(`${D.slate.date}|${g.away.abbr}|${g.home.abbr}`)) continue;
+    n++; hit += (g.live.hs > g.live.as) === (g.p_home >= 0.5);
+  }
+  return { hit, n };
+}
+
+function splitPanel(games) {
+  if (!games) return "";
+  const split = games.filter(disagrees);
+  const past = D.record.picks.filter((p) => p.score && p.p_market != null && (p.p_home >= 0.5) !== (p.p_market >= 0.5));
+  const modelRight = past.filter(isHit).length;
+  if (!split.length && !past.length) return "";
+  return `<div class="split-panel card">
+    <div class="split-head"><b>${split.length ? `Model and market disagree on ${split.length} game${split.length > 1 ? "s" : ""}` : "Model and market agree on every game"}</b>
+      ${past.length ? `<span class="mono muted">when they've disagreed this season: model ${modelRight}–${past.length - modelRight}</span>` : ""}</div>
+    ${split.length ? `<div class="split-list">${split.map((g) => {
+      const mSide = g.p_home >= 0.5 ? g.home : g.away, kSide = mSide === g.home ? g.away : g.home;
+      const w = winnerOf(g);
+      return `<a class="split-item ${w ? (w === mSide.abbr ? "won" : "lost") : ""}" href="${isToday(viewDay()) ? `#/game/${g.id}` : `#/day/${viewDay()}`}">
+        <span>${badge(g.away.abbr, g.away.color)}<span class="at">@</span>${badge(g.home.abbr, g.home.color)}</span>
+        <span>Model <b>${esc(mSide.abbr)} ${pct(Math.max(g.p_home, 1 - g.p_home))}</b><br>Market <b>${esc(kSide.abbr)} ${pct(Math.max(g.market.p_home, 1 - g.market.p_home))}</b></span>
+        ${w ? `<span class="split-res">${w === mSide.abbr ? "✓ model" : "✓ market"}</span>` : ""}</a>`;
+    }).join("")}</div>` : ""}
   </div>`;
 }
 
@@ -434,8 +484,7 @@ function pickRow(p) {
 }
 
 function viewSlate() {
-  const games = D.slate.games, live = D.record.season;
-  const nLocks = games.filter((g) => confidence(g) >= 0.7).length;
+  const games = D.slate.games, rec = seasonRecord();
   const top = D.teams.teams.slice(0, 6);
   return `<section class="hero">
     <div>
@@ -444,12 +493,11 @@ function viewSlate() {
       <p class="lede">A model that knows who is actually playing. It rates every player on advanced metrics, projects minutes, reads the injury report, and publishes a win probability for each game the morning of.</p>
       <div class="stats">
         <div class="stat"><b data-count="${games.length}">0</b><span>games ${D.slate.date ? dayLabel(D.slate.date, { weekday: "short" }) : ""}</span></div>
-        <div class="stat"><b data-count="${nLocks}">0</b><span>picks ≥ 70%</span></div>
         <div class="stat"><b data-count="${(D.backtest.overall.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><span>right since ${esc(D.backtest.first)}</span></div>
-        <div class="stat"><b>${live.n ? `${live.correct}-${live.n - live.correct}` : "0-0"}</b><span>record this season</span></div>
+        <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span id="season-pct">${rec.n ? `${pct(rec.hit / rec.n, 1)} right this season` : "record this season"}</span></div>
       </div>
     </div>
-    ${lockCard(games)}
+    ${lockCard(currentGames(), viewDay())}
   </section>
   ${D.custom ? `<div class="custom-banner card"><span><b>Showing your custom model</b> · ${esc(describe({ ...D.custom }))}</span><a href="#/lab">Edit in Model Lab →</a></div>` : ""}
   <section id="slate">
@@ -462,6 +510,7 @@ function viewSlate() {
         ${[["tip", "By tip time"], ["conf", "By confidence"]].map(([k, l]) => `<button class="chip ${state.sort === k ? "on" : ""}" data-sort="${k}">${l}</button>`).join("")}
       </div>
     </div>
+    <div id="split-wrap">${splitPanel(currentGames())}</div>
     <div class="games">${currentGames() == null ? `<div class="card empty"><span class="bounce" style="display:inline-block;width:18px;height:18px"></span></div>`
       : filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`}</div>
   </section>

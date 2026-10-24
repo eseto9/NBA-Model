@@ -447,3 +447,26 @@ td.r, th.r { text-align: right; }
 .verdict.v-hit { background: var(--good); }
 .verdict.v-miss { background: var(--bad); }
 .verdict { animation: pop .45s cubic-bezier(.3, 1.6, .5, 1) both; }
+
+/* model vs market */
+.tag.split { background: var(--orange); color: #fff; }
+.game.disagree:not(.is-final) { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange), var(--shadow); }
+.split-panel { padding: 14px 16px; margin: 0 0 14px; border-color: var(--orange); }
+.split-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; font-size: 15px; }
+.split-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.split-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 12px; background: var(--card-2); font-size: 12.5px; line-height: 1.5; transition: transform .15s; }
+.split-item:hover { transform: translateY(-2px); }
+.split-item > span:first-child { display: flex; align-items: center; gap: 4px; }
+.split-item .badge { width: 26px; height: 26px; font-size: 9px; }
+.split-item.won { box-shadow: inset 3px 0 0 var(--good); }
+.split-item.lost { box-shadow: inset 3px 0 0 var(--bad); }
+.split-res { font: 600 11px var(--mono); }
+.split-item.won .split-res { color: var(--good); }
+.split-item.lost .split-res { color: var(--bad); }
+.final-compare { flex-basis: 100%; display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.final-compare b { color: var(--ink); font-weight: 600; }
+.lock-result { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; padding: 8px 10px; border-radius: 10px; font: 700 14px var(--font); }
+.lock-result i { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; background: rgba(255, 255, 255, .2); }
+.lock-result span { font: 12px var(--mono); opacity: .8; font-weight: 400; margin-left: auto; }
+.lock-result.won { background: var(--good); color: #fff; }
+.lock-result.lost { background: var(--bad); color: #fff; }

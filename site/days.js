@@ -48,7 +48,8 @@ function withResults(games, day) {
     if (p && p.p_home != null) { g.p_home = p.p_home; g.pick = p.p_home >= 0.5 ? g.home.abbr : g.away.abbr; g.source = p.source; }
     if (p && p.score) g.live = { state: "post", as: p.score[0], hs: p.score[1], period: 4, detail: "Final" };
     const odds = (D.odds.games || {})[`${day}|${g.away.abbr}|${g.home.abbr}`];
-    if (p && p.p_market != null) g.market = { p_home: p.p_market, home_ml: p.ml ? p.ml[1] : null, away_ml: p.ml ? p.ml[0] : null, books: 1, history: [], provider: "closing line" };
+    if (p && p.p_market != null) g.market = { p_home: p.p_market, home_ml: p.ml ? p.ml[1] : null, away_ml: p.ml ? p.ml[0] : null,
+      home_best: p.ml ? p.ml[1] : null, away_best: p.ml ? p.ml[0] : null, books: 1, history: [], provider: "closing line" };
     else if (odds) g.market = odds;
     g.spread = (D.odds.spreads || {})[`${day}|${g.away.abbr}|${g.home.abbr}`] || null;
   }

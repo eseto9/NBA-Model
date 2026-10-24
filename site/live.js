@@ -100,13 +100,19 @@ function liveBlock(g) {
     <span class="live-score"><b class="${leadA ? "lead" : ""}">${esc(g.away.abbr)} ${x.as}</b><span class="muted">–</span><b class="${leadH ? "lead" : ""}">${x.hs} ${esc(g.home.abbr)}</b></span>
     ${hit == null ? `<span class="mono live-pre">pregame ${esc(g.p_home >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(g.p_home, 1 - g.p_home))}</span>`
       : `<span class="verdict ${hit ? "v-hit" : "v-miss"}"><i>${hit ? "✓" : "✗"}</i>${hit ? "Called it" : "Missed"}</span>`}
-    ${liveSpark(g)}
+    ${x.state === "post" ? finalCompare(g) : liveSpark(g)}
   </div>`;
+}
+
+function finalCompare(g) {
+  const homeWon = g.live.hs > g.live.as;
+  const pick = (p) => `${esc(p >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(p, 1 - p))} ${(p >= 0.5) === homeWon ? "✓" : "✗"}`;
+  return `<div class="final-compare mono"><span>Model <b>${pick(g.p_home)}</b></span>${g.market ? `<span>Market <b>${pick(g.market.p_home)}</b></span>` : ""}</div>`;
 }
 
 function liveSpark(g) {
   const h = LIVE.history[g.id] || [];
-  if (h.length < 2) return "";
+  if (h.length < 4) return "";                 // not until there's a trend to show
   const W = 220, H = 28, end = Math.max(2880, h[h.length - 1][0]);
   const pts = h.map(([t, p]) => `${(t / end) * W},${H - p * H}`).join(" ");
   return `<svg class="live-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Home win probability during the game">
@@ -125,8 +131,8 @@ function paintLive(g) {
   // once a game is over the bars go back to what was predicted; the score panel shows what happened
   const p = g.live.state === "post" ? g.p_home : g.live.p, bars = card.querySelectorAll(".tug-bar i"), nums = card.querySelectorAll(".tug-nums span:not(.tug-cap)");
   if (bars.length === 2) {
-    bars[0].style.flexBasis = `calc(${pct(1 - p, 1)} - 1px)`;
-    bars[1].style.flexBasis = `calc(${pct(p, 1)} - 1px)`;
+    bars[0].dataset.flex = bars[0].style.flexBasis = `calc(${pct(1 - p, 1)} - 1px)`;
+    bars[1].dataset.flex = bars[1].style.flexBasis = `calc(${pct(p, 1)} - 1px)`;
   }
   // not 100% until the buzzer
   const show = (q) => (g.live.state === "post" ? pct(q) : q > 0.995 ? ">99%" : q < 0.005 ? "<1%" : pct(q));
@@ -144,6 +150,13 @@ function paintLive(g) {
 }
 
 function paintTonight() {
+  const rec = typeof seasonRecord === "function" ? seasonRecord() : null, recEl = document.getElementById("season-rec");
+  if (rec && recEl) {
+    recEl.textContent = `${rec.hit}–${rec.n - rec.hit}`;
+    document.getElementById("season-pct").textContent = rec.n ? `${pct(rec.hit / rec.n, 1)} right this season` : "record this season";
+  }
+  const split = document.getElementById("split-wrap");
+  if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);
   const el = document.getElementById("tonight");
   if (!el) return;
   const games = D.slate.games, live = games.filter((g) => g.live && g.live.state === "in").length;

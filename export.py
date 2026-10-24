@@ -243,7 +243,9 @@ def historical_market():
     o = pd.concat(frames, ignore_index=True)
     o = o[(o.home_ml.abs() >= 100) & (o.away_ml.abs() >= 100)]
     o["p_market"] = [odds.no_vig(h, a) for h, a in zip(o.home_ml, o.away_ml)]
-    return o.groupby(["date", "home", "away"], as_index=False).p_market.mean()
+    g = o.groupby(["date", "home", "away"], as_index=False)
+    # one book's prices to show (and to price the best-value pick); the probability averages all books
+    return g.p_market.mean().merge(g[["home_ml", "away_ml"]].first().rename(columns={"home_ml": "hml", "away_ml": "aml"}), on=["date", "home", "away"])
 
 
 def versus_market(df):
@@ -414,6 +416,7 @@ def main(date=None, refresh=True):
     espn_lines = historical_market()
     graded = graded.merge(closing, on=keys, how="left").merge(espn_lines, on=keys, how="left")
     graded["p_market"] = graded.p_close.fillna(graded.p_market)
+    graded["home_ml"], graded["away_ml"] = graded.home_ml.fillna(graded.hml), graded.away_ml.fillna(graded.aml)
     graded = graded.sort_values(["date", "home"], ascending=False)
     done = graded[graded.home_pts.notna()]
     y = (done.home_pts > done.away_pts).astype(int)
