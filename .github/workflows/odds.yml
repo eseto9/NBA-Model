@@ -5,6 +5,9 @@ on:
     - cron: "5,20,35,50 21-23 * * *"
     - cron: "5,20,35,50 0-3 * * *"
   workflow_dispatch:
+  push:                        # also run whenever the odds or injury code changes
+    branches: [main]
+    paths: [".github/workflows/odds.yml", "odds.py", "injuries.py"]
 permissions:
   contents: write
   pages: write
