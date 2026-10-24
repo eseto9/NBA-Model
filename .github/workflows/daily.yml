@@ -3,6 +3,8 @@ on:
   schedule:
     - cron: "15 9 * * *"     # 5:15 AM EDT / 4:15 AM EST, after the night's last game
     - cron: "30 21 * * *"    # 5:30 PM EDT / 4:30 PM EST: re-price with the afternoon injury report
+    - cron: "45 11 * * *"    # backups: GitHub sometimes delays or skips scheduled runs, and a
+    - cron: "15 14 * * *"    # second run of the day just republishes the same slate
   workflow_dispatch:
   push:                      # also run once whenever this workflow changes
     branches: [main]

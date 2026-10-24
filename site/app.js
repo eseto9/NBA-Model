@@ -21,6 +21,14 @@ async function load() {
   const v = D.meta.generated_at;
   [D.slate, D.teams, D.players, D.record, D.backtest] = await Promise.all(
     ["slate.json", "teams.json", "players.json", "record.json", "backtest.json"].map((f) => get(f, v)));
+  // the morning run can be late or skipped by GitHub: once the slate's day is over, open on the
+  // next game day from its early-look file instead
+  const realToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const next = D.slate.date < realToday && (D.meta.day_files || []).find((d) => d >= realToday);
+  if (next) {
+    const j = await get(`days/${next}.json`, v).catch(() => null);
+    if (j && j.games.length) D.slate = { ...D.slate, date: next, games: j.games, unmatched_injuries: [] };
+  }
   D.teamBy = Object.fromEntries(D.teams.teams.map((t) => [t.abbr, t]));
   // betting lines refresh hourly, separately from the morning model run
   D.odds = await fetch(`data/odds.json?v=${Date.now()}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) || { games: {} };
