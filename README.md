@@ -53,6 +53,13 @@ game is on, every 5 minutes otherwise, and not while the tab is hidden. Cards sh
 to a live win probability: Brownian motion from the current lead and time left, centred on the pregame expected margin.
 A running tally shows tonight's record.
 
+## Browsing days
+The Today page has a day strip covering this season and the week ahead. Each morning's export writes
+`site/data/days/<date>.json` for every unplayed day in the window, and rewrites it until that day's games start, so a
+past day's file is the card published before tipoff. Past days show it next to the final scores and closing lines from
+the season record. Days before the site launched are rebuilt from the record's backfilled picks. Future days are an
+early look.
+
 ## Late scratches
 On the site, open a game and tap a player in either rotation to mark him out, or back in if he's listed as out. The
 browser recomputes both lineups with the model's own formulas and re-prices the game instantly. This is saved in

@@ -172,7 +172,8 @@ function outsLine(g) {
 
 function teamBlock(side, cls, picked) {
   const t = D.teamBy[side.abbr];
-  const rec = t ? `${t.w}-${t.l} · #${t.rank}` : "";
+  // records and ranks are as of today, so only show them on today's games
+  const rec = t && (typeof viewDay !== "function" || isToday(viewDay())) ? `${t.w}-${t.l} · #${t.rank}` : "";
   return `<div class="team ${cls} ${picked ? "picked" : ""}">${badge(side.abbr, side.color)}
     <div style="min-width:0"><div class="team-name">${esc(side.name)}</div><div class="team-sub">${rec}</div></div></div>`;
 }
@@ -189,8 +190,8 @@ function marketLine(g) {
 function gameCard(g) {
   const pa = 1 - g.p_home, open = state.open === g.id;
   const awayColor = colorsClash(g.away.color, g.home.color) ? "#8a857b" : g.away.color;
-  return `<article class="card game ${open ? "open" : ""}" data-game="${g.id}">
-    <div class="game-top"><span class="mono muted">${tipLabel(g.tip)}</span><span>${gameTags(g)}</span></div>
+  return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""}" data-game="${g.id}">
+    <div class="game-top"><span class="mono muted">${g.lite ? "" : tipLabel(g.tip)}</span><span>${gameTags(g)}</span></div>
     <div class="matchup">${teamBlock(g.away, "away", g.pick === g.away.abbr)}<span class="at">@</span>${teamBlock(g.home, "home", g.pick === g.home.abbr)}</div>
     <div class="tug">
       <div class="tug-wrap">
@@ -204,7 +205,7 @@ function gameCard(g) {
     <div class="live-slot">${typeof liveBlock === "function" ? liveBlock(g) : ""}</div>
     ${marketLine(g)}
     ${scratchNote(g)}
-    <div class="outs">${outsLine(g)}</div>
+    <div class="outs">${g.lite ? `<span>Backfilled pick${g.source === "backfill" ? " (before launch)" : ""}</span>` : outsLine(g)}</div>
     <span class="expand-hint">details →</span>
     ${open ? `<button class="close" aria-label="Close">✕</button>${gameDetail(g)}` : ""}
   </article>`;
@@ -347,8 +348,12 @@ function gameDetail(g) {
   </div>`;
 }
 
+function currentGames() {
+  return typeof dayGames === "function" ? dayGames(viewDay()) : D.slate.games;
+}
+
 function filteredGames() {
-  let gs = [...D.slate.games];
+  let gs = [...(currentGames() || [])];
   if (state.filter === "locks") gs = gs.filter((g) => confidence(g) >= 0.7);
   if (state.filter === "toss") gs = gs.filter((g) => confidence(g) < 0.6);
   if (state.sort === "conf") gs.sort((a, b) => confidence(b) - confidence(a));
@@ -447,16 +452,18 @@ function viewSlate() {
     ${lockCard(games)}
   </section>
   ${D.custom ? `<div class="custom-banner card"><span><b>Showing your custom model</b> · ${esc(describe({ ...D.custom }))}</span><a href="#/lab">Edit in Model Lab →</a></div>` : ""}
-  <section>
+  <section id="slate">
+    ${typeof dayStrip === "function" ? dayStrip() : ""}
     <div class="section-head">
-      <div><h2>${D.slate.date ? dayLabel(D.slate.date) : "No upcoming games"}</h2><div class="tonight" id="tonight"></div><p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
+      <div><h2>${viewDay() ? dayLabel(viewDay()) : "No upcoming games"}</h2>${isToday(viewDay()) ? `<div class="tonight" id="tonight"></div>` : dayHeading(viewDay(), currentGames())}<p>Bars show each team's win probability; the dark tick is the betting market. Tap a game to see why. <span class="muted">Late scratch? Open a game and tap the player.</span></p></div>
       <div class="chips">
         ${[["all", "All games"], ["locks", "Strong picks"], ["toss", "Close calls"]].map(([k, l]) => `<button class="chip ${state.filter === k ? "on" : ""}" data-filter="${k}">${l}</button>`).join("")}
         <span style="width:8px"></span>
         ${[["tip", "By tip time"], ["conf", "By confidence"]].map(([k, l]) => `<button class="chip ${state.sort === k ? "on" : ""}" data-sort="${k}">${l}</button>`).join("")}
       </div>
     </div>
-    <div class="games">${filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`}</div>
+    <div class="games">${currentGames() == null ? `<div class="card empty"><span class="bounce" style="display:inline-block;width:18px;height:18px"></span></div>`
+      : filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`}</div>
   </section>
   <section class="two">
     <div class="card panel"><div class="panel-head"><h3>Latest results</h3><a href="#/record">Full record →</a></div>${lastResults()}</div>
@@ -883,9 +890,11 @@ function pickLog() {
 
 function render() {
   const [, route = "", arg] = location.hash.split("/");
-  if (route === "game") { state.open = arg; }
-  const view = { "": viewSlate, game: viewSlate, rankings: viewRankings, players: viewPlayers, record: viewRecord, how: viewMethod, lab: viewLab }[route] || viewSlate;
-  const name = route === "game" ? "" : route;
+  if (route === "game") { state.open = arg; state.day = null; }
+  if (route === "day") { state.day = arg === D.slate.date ? null : arg; state.open = null; }
+  if (!route) state.day = null;
+  const view = { "": viewSlate, game: viewSlate, day: viewSlate, rankings: viewRankings, players: viewPlayers, record: viewRecord, how: viewMethod, lab: viewLab }[route] || viewSlate;
+  const name = route === "game" || route === "day" ? "" : route;
   $$("nav a").forEach((a) => a.classList.toggle("on", a.dataset.nav === (name || "slate")));
   const app = $("#app");
   app.innerHTML = `<div class="view">${view()}</div>`;
@@ -894,7 +903,11 @@ function render() {
   if (route === "record") bindRolling();
   if (route === "how") renderMath(app);
   if (route === "lab") mountLab();
-  if (!route || route === "game") requestAnimationFrame(() => typeof repaintLive === "function" && repaintLive());
+  if (!route || route === "game" || route === "day") requestAnimationFrame(() => {
+    if (typeof centerDayStrip === "function") centerDayStrip();
+    if (isToday(viewDay()) && typeof repaintLive === "function") repaintLive();
+  });
+  if (route === "day" && window.scrollY > 400) requestAnimationFrame(() => $("#slate")?.scrollIntoView({ block: "start" }));
   if (route === "game" && arg) requestAnimationFrame(() => $(`[data-game="${arg}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
@@ -902,7 +915,7 @@ function rerenderGames() {
   const grid = $(".games");
   grid.innerHTML = filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`;
   animateIn(grid);
-  requestAnimationFrame(() => typeof repaintLive === "function" && repaintLive());
+  requestAnimationFrame(() => isToday(viewDay()) && typeof repaintLive === "function" && repaintLive());
 }
 
 document.addEventListener("click", (e) => {
@@ -918,9 +931,10 @@ document.addEventListener("click", (e) => {
   }
   if (t.closest(".close")) { state.open = null; history.replaceState(null, "", "#/"); rerenderGames(); return; }
   const card = t.closest(".game");
+  if (card && card.classList.contains("lite")) return;
   if (card && !card.classList.contains("open")) {
     state.open = card.dataset.game;
-    history.replaceState(null, "", `#/game/${state.open}`);
+    if (isToday(viewDay())) history.replaceState(null, "", `#/game/${state.open}`);
     rerenderGames();
     requestAnimationFrame(() => $(`[data-game="${state.open}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
     return;

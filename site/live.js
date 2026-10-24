@@ -116,11 +116,12 @@ function liveSpark(g) {
 
 /* update one card in place: score block, and slide the bars to the live probability */
 function paintLive(g) {
+  if (typeof viewDay === "function" && !isToday(viewDay())) return;
   const card = document.querySelector(`[data-game="${g.id}"]`);
   if (!card) return;
   const slot = card.querySelector(".live-slot");
   if (slot) slot.innerHTML = liveBlock(g);
-  if (!g.live || g.live.state === "pre") return;
+  if (!g.live || g.live.state === "pre" || g.live.p == null) return;
   const p = g.live.p, bars = card.querySelectorAll(".tug-bar i"), nums = card.querySelectorAll(".tug-nums span");
   if (bars.length === 2) {
     bars[0].style.flexBasis = `calc(${pct(1 - p, 1)} - 1px)`;

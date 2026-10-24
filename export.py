@@ -167,6 +167,19 @@ def player_table(roster, pg, min_minutes=10):
 
 # ---------------------------------------------------------------- record
 
+def write_days(unplayed, models, roster, now):
+    """site/data/days/<date>.json for every unplayed day in the window. Rewritten each run until the
+    day's games start, so once a day is over its file is the last card published before tipoff."""
+    out = SITE / "days"
+    out.mkdir(parents=True, exist_ok=True)
+    for day, d in unplayed.groupby(unplayed.date.dt.strftime("%Y-%m-%d")):
+        d = d.sort_values("tip")
+        steps = factor_steps(models, nba.features(d))
+        games = [game_json(row, roster, s) for (_, row), s in zip(d.iterrows(), steps)]
+        (out / f"{day}.json").write_text(json.dumps({"date": day, "published": now.isoformat(timespec="minutes"), "games": games},
+                                                    separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+
+
 def scratches(start):
     """Manual availability overrides (data/overrides.csv) for today and tomorrow: (out, in) name lists."""
     if not OVERRIDES.exists():
@@ -383,6 +396,7 @@ def main(date=None, refresh=True):
     games = [game_json(row, roster, s) for (_, row), s in zip(slate.iterrows(), steps)]
     write("slate.json", {"date": f"{slate_day:%Y-%m-%d}" if slate_day is not None else None, "games": games,
                          "unmatched_injuries": sorted(unmatched)})
+    write_days(unplayed, models, roster, now)
 
     # record: every game this season, graded, next to the closing betting line. Live picks were
     # published before tipoff; games from before the site launched are backfilled by a model trained
@@ -472,6 +486,9 @@ def main(date=None, refresh=True):
             {"name": f, "coef": r(c, 4), "mean": r(mu, 4), "sd": r(sd, 4)}
             for f, c, mu, sd in zip(nba.features(trained.head(1)).columns, lr.coef_[0], scaler.mean_, scaler.scale_)]},
         "priors": {b: {k: r(v, 3) for k, v in p.items()} for b, p in rated[2].items()},
+        # days the Today page can show: archived or upcoming cards, plus this season's graded games
+        "days": sorted({f.stem for f in (SITE / "days").glob("*.json")} | {p["date"] for p in picks}),
+        "day_files": sorted(f.stem for f in (SITE / "days").glob("*.json")),
     })
     print(f"Wrote site data: {len(games)} games on {slate_day:%Y-%m-%d}" if games else "Wrote site data: no upcoming games")
     return [str(d) for d in pending]      # days whose games weren't final yet
