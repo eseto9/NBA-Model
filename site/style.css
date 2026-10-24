@@ -470,3 +470,19 @@ td.r, th.r { text-align: right; }
 .lock-result span { font: 12px var(--mono); opacity: .8; font-weight: 400; margin-left: auto; }
 .lock-result.won { background: var(--good); color: #fff; }
 .lock-result.lost { background: var(--bad); color: #fff; }
+
+/* injury news */
+.news { padding: 12px 16px; margin: 0 0 14px; }
+.news-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.news-list { display: grid; gap: 4px; margin-top: 8px; }
+.news-item { display: grid; grid-template-columns: 64px 30px 1fr; gap: 8px; align-items: center; font-size: 13px; padding: 4px 6px; border-radius: 8px; animation: rise .4s; }
+.news-item:hover { background: var(--card-2); }
+.news-item .badge { width: 24px; height: 24px; font-size: 8.5px; }
+.inj-note { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--orange-soft); font-size: 12.5px; }
+.inj-bolt { font-size: 13px; }
+.st-Out { color: var(--bad); }
+.st-Doubtful, .st-Questionable, .st-Day-To-Day { color: var(--orange); }
+.st-Healthy, .st-Probable { color: var(--good); }
+.pl.Questionable .pl-bar i, .pl.Doubtful .pl-bar i, .pl.Probable .pl-bar i { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .55) 0 2px, transparent 2px 5px); }
+.pl.Doubtful .pl-name { color: var(--muted); }
+.mkt-stat { color: var(--slate); }

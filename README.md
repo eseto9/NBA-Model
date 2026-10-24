@@ -60,6 +60,15 @@ past day's file is the card published before tipoff. Past days show it next to t
 the season record. Days before the site launched are rebuilt from the record's backfilled picks. Future days are an
 early look.
 
+## Published picks and injury news
+The published pick is the model blended with the betting market, using the walk-forward stack weights from the
+backtest. That matches the market's accuracy, while the model alone is about 0.4 points behind. The model's own
+number stays visible.
+
+Injury and availability news comes from the official NBA injury report PDF ([injuries.py](injuries.py), every 15
+minutes on game days) and ESPN's feed. The site polls ESPN every 5 minutes, re-prices games that haven't started
+when a status changes, and lists the changes under "Lineup news".
+
 ## Late scratches
 On the site, open a game and tap a player in either rotation to mark him out, or back in if he's listed as out. The
 browser recomputes both lineups with the model's own formulas and re-prices the game instantly. This is saved in

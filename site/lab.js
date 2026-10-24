@@ -425,8 +425,8 @@ async function applyCustomToToday() {
     const p = byKey[`${g.away.abbr}|${g.home.abbr}`];
     if (p == null) continue;
     g.p_default = g.p_home;
-    g.p_home = p;
-    g.pick = p >= 0.5 ? g.home.abbr : g.away.abbr;
+    g.p_model = p;                       // your model replaces the default model; the market blend still applies
+    republish(g);
   }
   return cfg;
 }

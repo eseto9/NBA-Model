@@ -246,7 +246,24 @@ def add_form(games, box):
 def load_players():
     """Rated player-games plus each player's latest state and newcomer priors."""
     pg = players.load_player_games(data_files("players"), GAME_TYPES)
-    return players.rate_players(add_draft_bucket(pg))
+    return players.rate_players(add_missed(add_draft_bucket(pg)))
+
+
+def team_game_numbers():
+    """Each team's games in order: (GAME_ID, TEAM_ID, GAME_DATE, n)."""
+    tg = load_team_games()[["GAME_ID", "TEAM_ID", "GAME_DATE"]].sort_values(["GAME_DATE", "GAME_ID"])
+    return tg.assign(n=tg.groupby("TEAM_ID").cumcount())
+
+
+def add_missed(pg):
+    """Team games a player missed in a row before each appearance (same team), for minutes restrictions."""
+    tn = team_game_numbers()
+    pg = pg.merge(tn[["GAME_ID", "TEAM_ID", "n"]], on=["GAME_ID", "TEAM_ID"], how="left")
+    pg = pg.sort_values(["PLAYER_ID", "GAME_DATE", "GAME_ID"]).reset_index(drop=True)
+    prev = pg.groupby("PLAYER_ID").n.shift(1)
+    same = pg.groupby("PLAYER_ID").TEAM_ID.shift(1) == pg.TEAM_ID
+    pg["missed"] = np.where(same, pg.n - prev - 1, 0).clip(0)
+    return pg.drop(columns="n")
 
 
 def add_lineups(games, lineups):
@@ -376,6 +393,14 @@ def train():
     return models
 
 
+def roster_missed(roster, latest):
+    """How many of his team's games each rostered player has missed since his last appearance."""
+    tn = team_game_numbers()
+    last = roster.PLAYER_ID.map(latest.set_index("PLAYER_ID").GAME_DATE)
+    counts = [int(((tn.TEAM_ID == t) & (tn.GAME_DATE > d)).sum()) if pd.notna(d) else 0 for t, d in zip(roster.team_id, last)]
+    return roster.assign(missed=counts)
+
+
 def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     """All games through `end` with features; unplayed ones use current rosters and injuries.
     Returns (games, window of games in [start, end) with home_win_prob, roster, unmatched injury names)."""
@@ -390,6 +415,7 @@ def prepare(start, end, force_out=(), force_in=(), rated=None, models=None):
     roster = add_draft_bucket(espn.rosters(LIVE, team_ids, known_players()))
     injuries = players.fetch_injuries()
     roster, unmatched = players.availability(roster, injuries, force_out, force_in)
+    roster = roster_missed(roster, latest)
     lineups, roster = players.upcoming_lineups(unplayed, roster, latest, priors)
     # RAPM for upcoming games: ratings from every stint so far, same availability weights
     import rapm

@@ -44,6 +44,7 @@ def main(push=True):
     log(f"odds: {(o.stdout + o.stderr).strip().splitlines()[-1:] or ''}")
     if not push:
         return 0
+    subprocess.run([sys.executable, "injuries.py"], cwd=ROOT, capture_output=True)
     git("add", "site/data", "data/espn", "log/predictions.csv", "log/rankings.csv", "log/odds.csv")
     if git("diff", "--cached", "--quiet").returncode == 0:
         log("no changes to publish")

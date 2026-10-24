@@ -143,6 +143,8 @@ function paintLive(g) {
     nums[1].textContent = show(p); nums[1].className = p < 0.5 ? "lose" : "";
   }
   card.classList.toggle("is-live", g.live.state === "in");
+  const tick = card.querySelector(".tug-mkt");          // the pregame market line means nothing on a live bar
+  if (tick) tick.style.display = "none";
   card.classList.toggle("is-final", g.live.state === "post");
   const hit = g.live.state === "post" ? (g.live.hs > g.live.as) === (g.p_home >= 0.5) : null;
   card.classList.toggle("call-hit", hit === true);
@@ -154,6 +156,8 @@ function paintTonight() {
   if (rec && recEl) {
     recEl.textContent = `${rec.hit}–${rec.n - rec.hit}`;
     document.getElementById("season-pct").textContent = rec.n ? pct(rec.hit / rec.n, 1) : "—";
+    const mk = document.getElementById("season-mkt");
+    if (mk) mk.textContent = rec.mN ? pct(rec.mHit / rec.mN, 1) : "—";
   }
   const split = document.getElementById("split-wrap");
   if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);

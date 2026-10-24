@@ -18,12 +18,14 @@ function saveScratches() {
   try { localStorage.setItem(SCRATCH_KEY, JSON.stringify({ date: D.slate.date, players: state.scratch })); } catch (e) { /* private mode */ }
 }
 const scratchKey = (side, p) => `${side.abbr}|${p.name}`;
+const AVAIL = { Out: 0, Doubtful: 0.15, Questionable: 0.5, "Day-To-Day": 0.5, Probable: 0.9 };   // players.AVAILABILITY
 
 /* players.lineup_strength in JS: top 10 by expected minutes x availability, minutes-weighted means */
 function lineupOf(side, useScratches) {
   const rows = side.rotation.map((p) => {
     const o = useScratches ? state.scratch[scratchKey(side, p)] : null;
-    const avail = o === "out" ? 0 : o === "in" ? 1 : p.status === "Out" ? 0 : p.status === "Day-To-Day" ? 0.5 : 1;
+    const st = useScratches && p.status_live ? p.status_live : p.status;     // latest injury news vs what was published
+    const avail = o === "out" ? 0 : o === "in" ? 1 : AVAIL[st] ?? 1;
     return { ...p, rapm: p.rapm ?? RAPM_REPLACEMENT, w: p.min * avail };
   }).sort((a, b) => b.w - a.w).slice(0, 10);
   const W = rows.reduce((s, p) => s + p.w, 0) || 1;
@@ -35,7 +37,7 @@ function lineupOf(side, useScratches) {
 function applyScratches() {
   const coef = Object.fromEntries(D.meta.model.features.map((f) => [f.name, f]));
   for (const g of D.slate.games) {
-    if (g.p_base == null) g.p_base = g.p_home;
+    if (g.p_base == null) g.p_base = modelP(g);            // scratches move the model; the blend follows
     const [h0, a0, h1, a1] = [lineupOf(g.home, false), lineupOf(g.away, false), lineupOf(g.home, true), lineupOf(g.away, true)];
     let dz = 0;
     for (const [k, f] of Object.entries(LINEUP_KEYS)) {
@@ -43,8 +45,8 @@ function applyScratches() {
       if (c) dz += (c.coef * ((h1[k] - a1[k]) - (h0[k] - a0[k]))) / c.sd;
     }
     const z = Math.log(g.p_base / (1 - g.p_base)) + dz;
-    g.p_home = 1 / (1 + Math.exp(-z));
-    g.pick = g.p_home >= 0.5 ? g.home.abbr : g.away.abbr;
+    g.p_model_adj = dz ? 1 / (1 + Math.exp(-z)) : null;
+    republish(g);
     g.scratched = [g.away, g.home].flatMap((s) => s.rotation.filter((p) => state.scratch[scratchKey(s, p)]).map((p) => ({ side: s, p, how: state.scratch[scratchKey(s, p)] })));
   }
 }
@@ -52,7 +54,7 @@ function applyScratches() {
 function scratchNote(g) {
   if (!g.scratched || !g.scratched.length) return "";
   return `<div class="scratch-note"><span>Your changes: ${g.scratched.map((x) => `<b>${esc(x.p.name)}</b> ${x.how === "out" ? "out" : "playing"}`).join(", ")}
-    · ${esc(g.home.abbr)} ${pct(g.p_base)} → <b>${pct(g.p_home)}</b></span><button class="chip" data-unscratch="${esc(g.id)}">Reset</button></div>`;
+    · model ${esc(g.home.abbr)} ${pct(g.p_base)} → <b>${pct(g.p_model_adj ?? g.p_base)}</b>${g.market ? `, published <b>${pct(g.p_home)}</b>` : ""}</span><button class="chip" data-unscratch="${esc(g.id)}">Reset</button></div>`;
 }
 
 document.addEventListener("click", (e) => {

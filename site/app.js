@@ -28,6 +28,7 @@ async function load() {
     const key = `${g.date}|${g.away.abbr}|${g.home.abbr}`;
     g.market = D.odds.games[key] || null;
     g.spread = (D.odds.spreads || {})[key] || null;      // display only; never a model input
+    republish(g);
   }
 }
 
@@ -89,7 +90,7 @@ function impliedSpread(g, p) {
 /* model minus market, in points, from the side the model likes more than the market does */
 function edge(g) {
   if (!g.market) return null;
-  const d = g.p_home - g.market.p_home;
+  const d = modelP(g) - g.market.p_home;
   return { team: d >= 0 ? g.home.abbr : g.away.abbr, pts: Math.abs(d) * 100 };
 }
 function ratingColor(gmsc) {                // sequential: light -> dark orange by player rating
@@ -161,8 +162,9 @@ function outsLine(g) {
   const outs = [];
   for (const side of [g.away, g.home]) {
     for (const p of side.rotation) {
-      if (p.status !== "Healthy" && p.min >= 12) {
-        const dtd = p.status === "Day-To-Day";
+      const st = p.status_live || p.status;
+      if (st !== "Healthy" && p.min >= 12) {
+        const dtd = st !== "Out";
         outs.push(`<span class="out ${dtd ? "dtd" : ""} ${p.manual ? "manual" : ""}" title="${esc(p.name)}: ${esc(p.status)}${p.manual ? " (late scratch)" : ""}">${esc(side.abbr)} ${esc(surname(p.name))}${dtd ? " ?" : ""}</span>`);
       }
     }
@@ -188,7 +190,7 @@ function marketLine(g) {
 }
 
 /* the model and the market pick different winners */
-const disagrees = (g) => !!g.market && (g.p_home >= 0.5) !== (g.market.p_home >= 0.5);
+const disagrees = (g) => !!g.market && (modelP(g) >= 0.5) !== (g.market.p_home >= 0.5);
 
 function gameCard(g) {
   const pa = 1 - g.p_home, open = state.open === g.id;
@@ -201,13 +203,14 @@ function gameCard(g) {
         <div class="tug-bar" role="img" aria-label="${esc(g.away.abbr)} ${pct(pa)}, ${esc(g.home.abbr)} ${pct(g.p_home)}">
           <i style="background:${esc(awayColor)}" data-flex="calc(${pct(pa, 1)} - 1px)"></i><i style="background:${esc(g.home.color)}" data-flex="calc(${pct(g.p_home, 1)} - 1px)"></i>
 </div>
-        ${g.market ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${esc(g.market.provider || "DraftKings")} via ESPN, margin removed"></span>` : ""}
+        ${g.market && !(g.live && g.live.state !== "pre") ? `<span class="tug-mkt" style="left:${pct(1 - g.market.p_home, 1)}" data-tip="<b>Betting market</b><br>${esc(g.home.abbr)} ${pct(g.market.p_home)} · ${esc(g.market.provider || "DraftKings")} via ESPN, margin removed"></span>` : ""}
       </div>
       <div class="tug-nums num"><span class="${pa < 0.5 ? "lose" : ""}">${pct(pa)}</span><span class="tug-cap">${g.live && g.live.state === "post" ? "pregame" : ""}</span><span class="${g.p_home < 0.5 ? "lose" : ""}">${pct(g.p_home)}</span></div>
     </div>
     <div class="live-slot">${typeof liveBlock === "function" ? liveBlock(g) : ""}</div>
     ${marketLine(g)}
     ${scratchNote(g)}
+    ${typeof injuryNote === "function" ? injuryNote(g) : ""}
     <div class="outs">${g.lite ? `<span>Backfilled pick${g.source === "backfill" ? " (before launch)" : ""}</span>` : outsLine(g)}</div>
     <span class="expand-hint">details →</span>
     ${open ? `<button class="close" aria-label="Close">✕</button>${gameDetail(g)}` : ""}
@@ -278,7 +281,7 @@ function rotationCol(side) {
   return `<div><div class="rot-head">${badge(side.abbr, side.color)}${esc(side.name)}</div>
     ${side.rotation.map((p) => {
       const mine = state.scratch[`${side.abbr}|${p.name}`];
-      const status = mine === "out" ? "Out" : mine === "in" ? "Healthy" : p.status;
+      const status = mine === "out" ? "Out" : mine === "in" ? "Healthy" : p.status_live || p.status;
       return `<div class="pl ${esc(status)} ${mine ? "mine" : ""}" data-scratch="${esc(side.abbr)}|${esc(p.name)}" data-status="${esc(p.status)}" data-tip="<b>${esc(p.name)}</b><br>${esc(p.status)}${p.manual ? " (late scratch)" : ""}${mine ? `, you marked ${mine === "out" ? "out" : "playing"}` : ""} · ${p.min} exp. min<br>Game Score/36 ${p.gmsc} · PIE ${pct(p.pie, 1)} · on-court net ${p.net > 0 ? "+" : ""}${p.net}<br>RAPM ${p.rapm > 0 ? "+" : ""}${p.rapm} per 100 poss.<br><i>tap to change</i>">
       <span class="pl-name">${esc(p.name)}${p.manual ? ` <span class="tag scratch">scratch</span>` : ""}${mine ? ` <span class="tag mine-tag">${mine === "out" ? "you: out" : "you: in"}</span>` : ""}</span>
       <div class="pl-bar"><i style="background:${ratingColor(p.gmsc)}" data-w="${pct(clamp(p.min / 38, 0.05, 1))}"></i></div></div>`;
@@ -305,12 +308,24 @@ function lineMovement(g) {
   return s;
 }
 
-/* Tipoff x Market: the walk-forward stacked blend from the backtest, applied to tonight's numbers */
-function blendProb(g) {
+/* The published pick blends the model with the betting market: the walk-forward stack from the
+   backtest, logit p = a + b*logit(market) + c*logit(model). The model's own number is p_model. */
+const modelP = (g) => (g.p_model != null ? g.p_model : g.p_home);
+function blendP(pModel, pMarket) {
   const b = D.backtest.blend && D.backtest.blend.coef;
-  if (!b || !g.market) return null;
+  if (!b || pMarket == null) return pModel;
   const lg = (p) => Math.log(p / (1 - p));
-  return 1 / (1 + Math.exp(-(b.a + b.market * lg(g.market.p_home) + b.model * lg(g.p_home))));
+  return 1 / (1 + Math.exp(-(b.a + b.market * lg(pMarket) + b.model * lg(pModel))));
+}
+/* re-blend with the latest line (odds refresh after the morning model run), until tipoff */
+function republish(g) {
+  if (g.live && g.live.state !== "pre") return;
+  const pm = g.p_model_adj != null ? g.p_model_adj : modelP(g);
+  g.p_home = g.market ? blendP(pm, g.market.p_home) : pm;
+  g.pick = g.p_home >= 0.5 ? g.home.abbr : g.away.abbr;
+  const last = g.steps && g.steps[g.steps.length - 1];
+  if (last && last.label === "Betting market") last.to = g.p_home;
+  else if (g.steps && g.steps.length && g.market && Math.abs(g.p_home - pm) > 1e-9) g.steps.push({ label: "Betting market", from: pm, to: g.p_home });
 }
 
 /* The side with positive expected value at the posted moneyline, if any */
@@ -326,15 +341,15 @@ function valueLine(g) {
 function marketPanel(g) {
   const m = g.market;
   if (!m) return "";
-  const pb = blendProb(g);
+  const pmod = modelP(g);
   const row = (side, p, pm, line, best) => `<tr><td><div class="tm">${badge(side.abbr, side.color)}${esc(side.abbr)}</div></td>
     <td class="r mono">${pct(p)}</td><td class="r mono">${pct(pm)}</td><td class="r mono">${ml(fairMl(p))}</td><td class="r mono">${ml(line)}</td></tr>`;
   const e = edge(g);
   return `<h4>Model vs betting market</h4>
     <table class="mkt-table"><thead><tr><th></th><th class="r">Model</th><th class="r">Market</th><th class="r">Model's fair odds</th><th class="r">Market odds</th></tr></thead><tbody>
-      ${row(g.away, 1 - g.p_home, 1 - m.p_home, m.away_ml, m.away_best)}${row(g.home, g.p_home, m.p_home, m.home_ml, m.home_best)}</tbody></table>
+      ${row(g.away, 1 - pmod, 1 - m.p_home, m.away_ml, m.away_best)}${row(g.home, pmod, m.p_home, m.home_ml, m.home_best)}</tbody></table>
     ${valueLine(g)}
-    ${pb == null ? "" : `<p class="mono" style="margin:10px 0 0">Tipoff × Market blend: <b>${esc(pb >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(pb, 1 - pb))}</b> <span class="muted" title="Logistic stack fit walk-forward on past seasons: ${(D.backtest.blend.coef.market).toFixed(2)} x market log-odds + ${(D.backtest.blend.coef.model).toFixed(2)} x model log-odds">ⓘ</span></p>`}
+    ${D.backtest.blend ? `<p class="mono" style="margin:10px 0 0">Published pick: <b>${esc(g.p_home >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(g.p_home, 1 - g.p_home))}</b> = model ${pct(Math.max(pmod, 1 - pmod))} blended with the market <span class="muted" title="Logistic stack fit walk-forward on past seasons: ${(D.backtest.blend.coef.market).toFixed(2)} x market log-odds + ${(D.backtest.blend.coef.model).toFixed(2)} x model log-odds. It matches the market's accuracy in the backtest; the model alone is about 0.4 points behind.">ⓘ</span></p>` : ""}
     ${g.spread ? `<p class="mono" style="margin:10px 0 0">Spread <b>${esc(g.spread.text)}</b>${g.spread.total ? ` · total ${g.spread.total}` : ""} <span class="muted">(${esc(g.spread.provider || "")}, display only)</span> · model ≈ <b>${impliedSpread(g, g.p_home)}</b> <span class="muted" title="Converts the model's win probability to a point spread, assuming the final margin is normal with SD ${MARGIN_SD}">ⓘ</span></p>` : ""}
     <p class="mono muted" style="margin:8px 0 4px">${e.pts < 1 ? "Model and market agree." : `Model is ${e.pts.toFixed(1)} pts higher on ${esc(e.team)} than the market.`} Market = ${esc(m.provider || "DraftKings")} moneyline via ESPN, margin removed.${m.home_open != null ? ` Opened ${esc(g.away.abbr)} ${ml(m.away_open)} / ${esc(g.home.abbr)} ${ml(m.home_open)}.` : ""}</p>
     ${lineMovement(g)}`;
@@ -438,14 +453,20 @@ function slateDayLabel() {
 
 /* season record, counting tonight's finished games before the morning update grades them */
 function seasonRecord() {
-  let hit = 0, n = 0;
+  let hit = 0, n = 0, mHit = 0, mN = 0;
   const graded = new Set();
-  for (const p of D.record.picks) if (p.score) { n++; hit += isHit(p); graded.add(`${p.date}|${p.away}|${p.home}`); }
+  for (const p of D.record.picks) {
+    if (!p.score) continue;
+    n++; hit += isHit(p); graded.add(`${p.date}|${p.away}|${p.home}`);
+    if (p.p_market != null) { mN++; mHit += (p.p_market >= 0.5) === (p.score[1] > p.score[0]); }
+  }
   for (const g of D.slate.games) {
     if (!g.live || g.live.state !== "post" || graded.has(`${D.slate.date}|${g.away.abbr}|${g.home.abbr}`)) continue;
-    n++; hit += (g.live.hs > g.live.as) === (g.p_home >= 0.5);
+    const homeWon = g.live.hs > g.live.as;
+    n++; hit += homeWon === (g.p_home >= 0.5);
+    if (g.market) { mN++; mHit += homeWon === (g.market.p_home >= 0.5); }
   }
-  return { hit, n };
+  return { hit, n, mHit, mN };
 }
 
 function splitPanel(games) {
@@ -500,7 +521,8 @@ function viewSlate() {
       <p class="lede">A model that knows who is actually playing. It rates every player on advanced metrics, projects minutes, reads the injury report, and publishes a win probability for each game the morning of.</p>
       <div class="stats">
         <div class="stat"><b data-count="${games.length}">0</b><span>${slateDayLabel()}</span></div>
-        <div class="stat"><b id="season-pct">${rec.n ? pct(rec.hit / rec.n, 1) : "—"}</b><span>right this season</span></div>
+        <div class="stat"><b id="season-pct">${rec.n ? pct(rec.hit / rec.n, 1) : "—"}</b><span>Tipoff right this season</span></div>
+        <div class="stat"><b id="season-mkt" class="mkt-stat">${rec.mN ? pct(rec.mHit / rec.mN, 1) : "—"}</b><span>market right this season</span></div>
         <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span>record this season</span></div>
       </div>
     </div>
@@ -517,6 +539,7 @@ function viewSlate() {
         ${[["tip", "By tip time"], ["conf", "By confidence"]].map(([k, l]) => `<button class="chip ${state.sort === k ? "on" : ""}" data-sort="${k}">${l}</button>`).join("")}
       </div>
     </div>
+    ${isToday(viewDay()) ? `<div class="card news" id="inj-news"></div>` : ""}
     <div id="split-wrap">${splitPanel(currentGames())}</div>
     <div class="games">${currentGames() == null ? `<div class="card empty"><span class="bounce" style="display:inline-block;width:18px;height:18px"></span></div>`
       : filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`}</div>
@@ -962,6 +985,7 @@ function render() {
   if (!route || route === "game" || route === "day") requestAnimationFrame(() => {
     if (typeof centerDayStrip === "function") centerDayStrip();
     if (isToday(viewDay()) && typeof repaintLive === "function") repaintLive();
+    if (typeof paintNews === "function") paintNews();
   });
   if (route === "day" && window.scrollY > 400) requestAnimationFrame(() => $("#slate")?.scrollIntoView({ block: "start" }));
   if (route === "game" && arg) requestAnimationFrame(() => $(`[data-game="${arg}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -1072,6 +1096,7 @@ load().then(async () => {
   addEventListener("hashchange", render);
   setInterval(tickCountdown, 1000);
   if (typeof pollLive === "function") pollLive();
+  if (typeof pollInjuries === "function") pollInjuries();
   tickCountdown();
 }).catch((err) => {
   $("#app").innerHTML = `<div class="empty">Couldn't load today's data (${esc(err.message)}).</div>`;

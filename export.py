@@ -87,6 +87,36 @@ def rotation(roster, team_id, n=11):
              "gmsc": r(p.r_gmsc, 1), "pie": r(p.r_pie), "net": r(p.r_net, 1), "rapm": r(p.r_rapm, 2)} for p in t.itertuples()]
 
 
+def blend_coef():
+    """Weights of the walk-forward Tipoff x Market stack (from the last backtest), or None."""
+    path = SITE / "backtest.json"
+    return (json.loads(path.read_text(encoding="utf-8")).get("blend") or {}).get("coef") if path.exists() else None
+
+
+def blend(p_model, p_market, coef):
+    return logistic(coef["a"] + coef["market"] * logit(p_market) + coef["model"] * logit(p_model))
+
+
+def publish(games, coef):
+    """The published pick: the model blended with the latest pre-tip betting line where there is one
+    (p_model keeps the model's own number)."""
+    lines = odds.closing_lines()[["date", "home", "away", "p_home"]].rename(columns={"p_home": "p_mkt"})
+    games = games.assign(day=games.date.dt.strftime("%Y-%m-%d")).merge(
+        lines.rename(columns={"date": "day"}), on=["day", "home", "away"], how="left").drop(columns="day")
+    games["p_model"] = games.home_win_prob
+    if coef:
+        m = games.p_mkt.notna()
+        games.loc[m, "home_win_prob"] = blend(games.p_model[m], games.p_mkt[m], coef)
+    return games
+
+
+def with_market_step(steps, row):
+    """The factor chart ends at the published number: one more step for the betting market."""
+    if pd.notna(row.get("p_mkt")) and abs(row.home_win_prob - row.p_model) > 1e-9:
+        steps = steps + [{"label": "Betting market", "from": r(row.p_model), "to": r(row.home_win_prob)}]
+    return steps
+
+
 def game_json(row, roster, steps):
     def side(s):
         sfx = "_h" if s == "home" else "_a"
@@ -102,7 +132,7 @@ def game_json(row, roster, steps):
     p = float(row.home_win_prob)
     return {
         "id": row.game_id, "date": f"{row.date:%Y-%m-%d}", "tip": row.get("tip"),
-        "neutral": bool(row.neutral), "p_home": r(p), "p_elo": r(row.elo_prob),
+        "neutral": bool(row.neutral), "p_home": r(p), "p_model": r(row.get("p_model", p)), "p_elo": r(row.elo_prob),
         "pick": row.home if p >= 0.5 else row.away, "steps": steps,
         "home": side("home"), "away": side("away"),
     }
@@ -175,7 +205,7 @@ def write_days(unplayed, models, roster, now):
     for day, d in unplayed.groupby(unplayed.date.dt.strftime("%Y-%m-%d")):
         d = d.sort_values("tip")
         steps = factor_steps(models, nba.features(d))
-        games = [game_json(row, roster, s) for (_, row), s in zip(d.iterrows(), steps)]
+        games = [game_json(row, roster, with_market_step(s, row)) for (_, row), s in zip(d.iterrows(), steps)]
         (out / f"{day}.json").write_text(json.dumps({"date": day, "published": now.isoformat(timespec="minutes"), "games": games},
                                                     separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
 
@@ -195,13 +225,14 @@ def update_log(slate, now):
     game tips off; after that it is frozen and graded."""
     LOG.parent.mkdir(exist_ok=True)
     log = pd.read_csv(LOG, dtype={"game_id": str}) if LOG.exists() else pd.DataFrame(
-        columns=["game_id", "date", "away", "home", "p_home", "logged_at"])
+        columns=["game_id", "date", "away", "home", "p_home", "p_model", "logged_at"])
     key = lambda d: d.date.astype(str).str[:10] + d.home + d.away
     not_started = slate.tip.isna() | (pd.to_datetime(slate.tip) > pd.Timestamp(now.replace(tzinfo=None)))
     revisable = slate[not_started | ~key(slate).isin(key(log))]
     if len(revisable):
         add = pd.DataFrame({"game_id": revisable.game_id, "date": revisable.date.dt.strftime("%Y-%m-%d"), "away": revisable.away,
-                            "home": revisable.home, "p_home": revisable.home_win_prob.round(4), "logged_at": now.isoformat(timespec="minutes")})
+                            "home": revisable.home, "p_home": revisable.home_win_prob.round(4),
+                            "p_model": revisable.p_model.round(4), "logged_at": now.isoformat(timespec="minutes")})
         log = pd.concat([log[~key(log).isin(key(add))], add], ignore_index=True)
         log.to_csv(LOG, index=False)
     return log
@@ -386,12 +417,13 @@ def main(date=None, refresh=True):
     force_out, force_in = scratches(start)
     g, window, roster, unmatched = nba.prepare(start, start + pd.Timedelta(days=8), force_out, force_in, rated=rated, models=models)
     season = nba.current_season(start.date())
-    unplayed = window[window.home_pts.isna()]
+    coef = blend_coef()
+    unplayed = publish(window[window.home_pts.isna()], coef)
     slate_day = unplayed.date.min() if len(unplayed) else None
     slate = unplayed[unplayed.date == slate_day].sort_values("tip") if slate_day is not None else unplayed
 
     steps = factor_steps(models, nba.features(slate)) if len(slate) else []
-    games = [game_json(row, roster, s) for (_, row), s in zip(slate.iterrows(), steps)]
+    games = [game_json(row, roster, with_market_step(s, row)) for (_, row), s in zip(slate.iterrows(), steps)]
     write("slate.json", {"date": f"{slate_day:%Y-%m-%d}" if slate_day is not None else None, "games": games,
                          "unmatched_injuries": sorted(unmatched)})
     write_days(unplayed, models, roster, now)
@@ -408,20 +440,27 @@ def main(date=None, refresh=True):
                              "p_back": nba.predict_proba(pre_season_model, played),
                              "home_pts": played.home_pts, "away_pts": played.away_pts})
     keys = ["date", "home", "away"]
-    graded = back.merge(log[keys + ["game_id", "p_home"]], on=keys, how="outer")
+    if "p_model" not in log:
+        log["p_model"] = np.nan
+    graded = back.merge(log[keys + ["game_id", "p_home", "p_model"]], on=keys, how="outer")
     graded["source"] = np.where(graded.p_home.notna(), "live", "backfill")
+    graded["p_model"] = graded.p_model.fillna(graded.p_back).fillna(graded.p_home)
     graded["p_home"] = graded.p_home.fillna(graded.p_back)
     # closing line: last pre-tip snapshot from the live feed, else the line ESPN stored with the box score
     closing = odds.closing_lines()[keys + ["p_home", "home_ml", "away_ml"]].rename(columns={"p_home": "p_close"})
     espn_lines = historical_market()
     graded = graded.merge(closing, on=keys, how="left").merge(espn_lines, on=keys, how="left")
     graded["p_market"] = graded.p_close.fillna(graded.p_market)
+    coef = blend_coef()
+    if coef:                              # backfilled picks are published the same way: blended where a line existed
+        m = (graded.source == "backfill") & graded.p_market.notna() & graded.p_back.notna()
+        graded.loc[m, "p_home"] = blend(graded.p_back[m], graded.p_market[m], coef)
     graded["home_ml"], graded["away_ml"] = graded.home_ml.fillna(graded.hml), graded.away_ml.fillna(graded.aml)
     graded = graded.sort_values(["date", "home"], ascending=False)
     done = graded[graded.home_pts.notna()]
     y = (done.home_pts > done.away_pts).astype(int)
     live = done.source == "live"
-    picks = [{"date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home), "source": x.source,
+    picks = [{"date": x.date, "away": x.away, "home": x.home, "p_home": r(x.p_home), "p_model": r(x.p_model), "source": x.source,
               "p_market": r(x.p_market), "ml": None if pd.isna(x.home_ml) else [int(x.away_ml), int(x.home_ml)],
               "score": None if pd.isna(x.home_pts) else [int(x.away_pts), int(x.home_pts)]}
              for x in graded.itertuples()]

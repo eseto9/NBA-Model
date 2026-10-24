@@ -12,10 +12,11 @@ import unicodedata
 
 import numpy as np
 import pandas as pd
-import requests
 
 PLAYER_HALFLIFE = 25     # player games
-MIN_HALFLIFE = 6         # player games, for expected minutes
+MIN_HALFLIFE = 3         # player games, for expected minutes (tools/minutes.py: best of 2-8)
+RETURN_GAMES = 3         # a player who missed this many team games in a row...
+RETURN_FACTOR = 0.85     # ...is expected to play this share of his usual minutes in his first game back
 PRIOR_MIN = 250          # pseudo-minutes of newcomer-level play blended into each rating
 LINEUP_SIZE = 10         # top players by expected minutes that make up the lineup
 DTD_WEIGHT = 0.5         # day-to-day players count for half their expected minutes
@@ -121,6 +122,8 @@ def rate_players(pg):
         pg[f"r_{m}"] = pg[f"post_{m}"].groupby(by).shift(1).fillna(prior)
     pg["post_min"] = pg.MIN.groupby(by).transform(lambda x: x.ewm(halflife=MIN_HALFLIFE).mean())
     pg["exp_min"] = pg.post_min.groupby(by).shift(1).fillna(bucket.map({b: p["min"] for b, p in priors.items()}))
+    if "missed" in pg:                    # minutes restriction after an absence
+        pg["exp_min"] = pg.exp_min.where(pg.missed < RETURN_GAMES, pg.exp_min * RETURN_FACTOR)
 
     post = ["post_min"] + [f"post_{m}" for m in METRICS]
     latest = pg.groupby("PLAYER_ID").tail(1)[["PLAYER_ID", "PLAYER_NAME", "GAME_DATE"] + post]
@@ -158,28 +161,27 @@ def norm_name(name):
 
 
 def fetch_injuries():
-    """ESPN injury report -> DataFrame(name, status, detail)."""
-    j = requests.get("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries", timeout=30).json()
-    rows = []
-    for team in j.get("injuries", []):
-        for i in team.get("injuries", []):
-            d = i.get("details", {})
-            rows.append({"name": i["athlete"]["displayName"], "status": i["status"],
-                         "detail": " ".join(str(d.get(k, "")) for k in ("type", "detail")).strip(),
-                         "return": d.get("returnDate", "")})
-    return pd.DataFrame(rows, columns=["name", "status", "detail", "return"])
+    """Every listed player's status: the official NBA injury report, then ESPN (injuries.py)."""
+    import injuries
+    return injuries.combined()[1]
 
 
-def availability(roster, injuries, force_out=(), force_in=()):
-    """Weight per roster player: 0 out, DTD_WEIGHT day-to-day, 1 healthy."""
-    status = dict(zip(injuries.name.map(norm_name), injuries.status))
-    keys = roster.PLAYER_NAME.map(norm_name)
-    unmatched = set(status) - set(keys)
-    st = keys.map(status).fillna("Healthy")
-    manual_out, manual_in = keys.isin({norm_name(n) for n in force_out}), keys.isin({norm_name(n) for n in force_in})
+# share of expected minutes a player is counted for, by listed status
+AVAILABILITY = {"Out": 0.0, "Doubtful": 0.15, "Questionable": DTD_WEIGHT, "Day-To-Day": DTD_WEIGHT, "Probable": 0.9}
+
+
+def availability(roster, injury_list, force_out=(), force_in=()):
+    """Weight per roster player from his listed status (AVAILABILITY; unlisted or Available = 1)."""
+    import injuries
+    status = dict(zip(injury_list.key, injury_list.status))
+    keys = roster.PLAYER_NAME.map(injuries.name_key)
+    unmatched = {n for k, n in zip(injury_list.key, injury_list.name) if k not in set(keys)}
+    st = keys.map(status).fillna("Healthy").replace("Available", "Healthy")
+    manual_out = keys.isin({injuries.name_key(n) for n in force_out})
+    manual_in = keys.isin({injuries.name_key(n) for n in force_in})
     st[manual_out] = "Out"
     st[manual_in] = "Healthy"
-    avail = st.map({"Out": 0.0, "Day-To-Day": DTD_WEIGHT}).fillna(1.0)
+    avail = st.map(AVAILABILITY).fillna(1.0)
     return roster.assign(status=st.values, avail=avail.values, manual=(manual_out | manual_in).values), unmatched
 
 
@@ -188,6 +190,8 @@ def upcoming_lineups(games, roster, latest, priors):
     r = roster.merge(latest.drop(columns=["PLAYER_NAME"]), on="PLAYER_ID", how="left")
     # players with no NBA games yet start at their draft range's level (roster carries draft_bucket)
     r["exp_min"] = r.exp_min.fillna(r.draft_bucket.map({b: p["min"] for b, p in priors.items()}))
+    if "missed" in r:                     # first game back from an absence: minutes restriction
+        r["exp_min"] = r.exp_min.where(r.missed < RETURN_GAMES, r.exp_min * RETURN_FACTOR)
     for m in METRICS:
         r[f"r_{m}"] = r[f"r_{m}"].fillna(r.draft_bucket.map({b: p[m] for b, p in priors.items()}))
     sides = pd.concat([games[["game_id", f"{s}_id"]].rename(columns={f"{s}_id": "team_id"}) for s in ("home", "away")])
