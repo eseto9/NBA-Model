@@ -55,6 +55,7 @@ async function pollLive() {
     const r = await fetch(`${SCOREBOARD}?dates=${day}&_=${Date.now()}`);
     const events = (await r.json()).events || [];
     LIVE.fetchedAt = new Date();
+    let linesMoved = false;
     for (const e of events) {
       const x = parseEvent(e), g = D.slate.games.find((q) => q.id.endsWith(`E${e.id}`) || (q.home.abbr === x.home && q.away.abbr === x.away));
       if (!g) continue;
@@ -69,8 +70,10 @@ async function pollLive() {
       const h = (LIVE.history[g.id] = LIVE.history[g.id] || []);
       if (x.state !== "pre" && (!h.length || h[h.length - 1][1] !== x.p)) h.push([elapsed(x.period, x.clock), x.p]);
       g.live = x;
+      if (x.state === "pre" && updateLine(g, e)) linesMoved = true;
       paintLive(g);
     }
+    if (linesMoved && isToday(viewDay())) rerenderGames();
     paintTonight();
     tickerLive();
   } catch (err) {
@@ -80,6 +83,22 @@ async function pollLive() {
   const soon = D.slate.games.some((g) => (!g.live || g.live.state === "pre") && g.tip && etDate(g.tip) - Date.now() < 20 * 60e3);
   const allDone = D.slate.games.every((g) => g.live && g.live.state === "post");
   schedule(allDone ? 0 : anyLive || soon ? 30 : 300);
+}
+
+/* the scoreboard also carries DraftKings' current moneyline: keep the market (and the published
+   blend) current in the browser even when a scheduled odds run is late */
+function updateLine(g, e) {
+  const book = (e.competitions[0].odds || [])[0], m = book && book.moneyline;
+  const num = (v) => { const t = String((v && v.odds) || "").toUpperCase(); return t === "EVEN" ? 100 : Number.isFinite(+t) && t ? +t : null; };
+  const h = m && num(m.home && m.home.close), a = m && num(m.away && m.away.close);
+  if (h == null || a == null || (g.market && g.market.home_ml === h && g.market.away_ml === a)) return false;
+  const imp = (v) => (v > 0 ? 100 / (v + 100) : -v / (-v + 100));
+  const p = imp(h) / (imp(h) + imp(a));
+  const history = (g.market && g.market.history) || [];
+  g.market = { ...(g.market || {}), p_home: p, home_ml: h, away_ml: a, home_best: h, away_best: a, books: 1,
+    provider: (book.provider && book.provider.name) || "DraftKings", history: [...history, [new Date().toISOString(), p]] };
+  republish(g);
+  return true;
 }
 
 function schedule(secs) {
