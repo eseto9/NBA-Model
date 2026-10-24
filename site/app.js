@@ -158,20 +158,6 @@ function gameTags(g) {
   return tags.join(" ");
 }
 
-function outsLine(g) {
-  const outs = [];
-  for (const side of [g.away, g.home]) {
-    for (const p of side.rotation) {
-      const st = p.status_live || p.status;
-      if (st !== "Healthy" && p.min >= 12) {
-        const dtd = st !== "Out";
-        outs.push(`<span class="out ${dtd ? "dtd" : ""} ${p.manual ? "manual" : ""}" title="${esc(p.name)}: ${esc(p.status)}${p.manual ? " (late scratch)" : ""}">${esc(side.abbr)} ${esc(surname(p.name))}${dtd ? " ?" : ""}</span>`);
-      }
-    }
-  }
-  return outs.length ? outs.join("") : `<span>Full-strength rotations</span>`;
-}
-
 function teamBlock(side, cls, picked) {
   const t = D.teamBy[side.abbr];
   // records and ranks are as of today, so only show them on today's games
@@ -192,7 +178,22 @@ function marketLine(g) {
 /* the model and the market pick different winners */
 const disagrees = (g) => !!g.market && (modelP(g) >= 0.5) !== (g.market.p_home >= 0.5);
 
+/* a finished game: the score and whether the pick was right, nothing else */
+function finalCard(g, open) {
+  const x = g.live, homeWon = x.hs > x.as, hit = homeWon === (g.p_home >= 0.5);
+  const pick = (p) => `${esc(p >= 0.5 ? g.home.abbr : g.away.abbr)} ${pct(Math.max(p, 1 - p))}`;
+  const row = (side, pts, won) => `<div class="fc-row ${won ? "win" : ""}">${badge(side.abbr, side.color)}<span class="fc-name">${esc(side.name)}</span><b class="fc-pts">${pts}</b></div>`;
+  return `<article class="card game is-final compact-final ${hit ? "call-hit" : "call-miss"} ${open ? "open" : ""} ${g.lite ? "lite" : ""}" data-game="${g.id}">
+    <div class="fc-top"><span class="mono muted">FINAL${x.period > 4 ? ` · ${x.period - 4 > 1 ? x.period - 4 : ""}OT` : ""}</span>
+      <span class="verdict big ${hit ? "v-hit" : "v-miss"}"><i>${hit ? "✓" : "✗"}</i>${hit ? "Called it" : "Missed"}</span></div>
+    ${row(g.away, x.as, !homeWon)}${row(g.home, x.hs, homeWon)}
+    <div class="fc-sub mono">Pick <b>${pick(g.p_home)}</b>${g.market ? ` · Market <b>${pick(g.market.p_home)}</b>` : ""}</div>
+    ${open ? gameDetail(g) : ""}
+  </article>`;
+}
+
 function gameCard(g) {
+  if (g.live && g.live.state === "post") return finalCard(g, state.open === g.id);
   const pa = 1 - g.p_home, open = state.open === g.id;
   const awayColor = colorsClash(g.away.color, g.home.color) ? "#8a857b" : g.away.color;
   return `<article class="card game ${open ? "open" : ""} ${g.lite ? "lite" : ""} ${g.live && g.live.state === "post" ? `is-final ${(g.live.hs > g.live.as) === (g.p_home >= 0.5) ? "call-hit" : "call-miss"}` : ""} ${disagrees(g) ? "disagree" : ""}" data-game="${g.id}">
@@ -211,9 +212,9 @@ function gameCard(g) {
     ${marketLine(g)}
     ${scratchNote(g)}
     ${typeof injuryNote === "function" ? injuryNote(g) : ""}
-    <div class="outs">${g.lite ? `<span>Backfilled pick${g.source === "backfill" ? " (before launch)" : ""}</span>` : outsLine(g)}</div>
+    ${g.lite ? `<div class="outs"><span>Backfilled pick${g.source === "backfill" ? " (before launch)" : ""}</span></div>` : ""}
     <span class="expand-hint">details →</span>
-    ${open ? `<button class="close" aria-label="Close">✕</button>${gameDetail(g)}` : ""}
+    ${open ? gameDetail(g) : ""}
   </article>`;
 }
 
@@ -396,51 +397,76 @@ function bestValue(games) {
   return best;
 }
 
-function lockCard(games, day = D.slate.date) {
+/* Hero picks: the best-value bet (or the strongest pick when nothing beats the price), and the
+   most likely winner as its own card. Both show the result once the game is over. */
+function heroPicks(games, day = D.slate.date) {
   if (!games || !games.length) return `<div class="lock"><div class="label">No games ${games ? "scheduled" : "loaded yet"}</div><p>Pick another day.</p></div>`;
   const conf = games.reduce((a, b) => (confidence(b) > confidence(a) ? b : a));
   const v = bestValue(games);
   const useValue = v && v.ev > 0;
-  const g = useValue ? v.g : conf;
-  const side = useValue ? v.side : g.p_home >= 0.5 ? g.home : g.away, opp = side === g.home ? g.away : g.home;
-  const c = useValue ? v.p : confidence(g);
-  const R = 56, C = 2 * Math.PI * R;
-  const first = games.map((x) => x.tip).filter(Boolean).sort()[0];
-  const label = useValue ? "Best value vs the odds" : v ? "Strongest pick · no edge on the market" : isToday(day) ? "Strongest pick · odds not posted yet" : "Strongest pick";
-  const confSide = conf.p_home >= 0.5 ? conf.home : conf.away;
+  return valueCard(useValue ? v : null, conf, games, day) + (useValue && v.g !== conf ? winnerCard(conf, day) : "");
+}
+
+function valueCard(v, conf, games, day) {
+  const g = v ? v.g : conf;
+  const side = v ? v.side : g.p_home >= 0.5 ? g.home : g.away, opp = side === g.home ? g.away : g.home;
+  const c = v ? v.p : confidence(g);
+  const R = 56, C = 2 * Math.PI * R, r2 = R - (v ? 13 : 0), C2 = 2 * Math.PI * r2;
+  const label = v ? "Best value vs the odds" : bestValue(games) ? "Strongest pick · no bet beats the odds" : isToday(day) ? "Strongest pick · odds not posted yet" : "Strongest pick";
+  const breakEven = v ? 1 / (1 + payout(v.price)) : null;
   return `<div class="lock">
     <div class="label">${label} · ${dayLabel(day, { weekday: "short", month: "short", day: "numeric" })}</div>
     <div class="lock-body">
       <div class="gauge"><svg viewBox="0 0 132 132" width="132" height="132">
         <circle cx="66" cy="66" r="${R}" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="11"/>
-        ${useValue ? `<circle cx="66" cy="66" r="${R}" fill="none" stroke="var(--slate)" stroke-width="11" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-dash="${C * (1 - v.pm)}" class="arc" opacity=".9"/>` : ""}
-        <circle class="arc" cx="66" cy="66" r="${R - (useValue ? 13 : 0)}" fill="none" stroke="var(--orange)" stroke-width="11" stroke-linecap="round"
-          stroke-dasharray="${2 * Math.PI * (R - (useValue ? 13 : 0))}" stroke-dashoffset="${2 * Math.PI * (R - (useValue ? 13 : 0))}" data-dash="${2 * Math.PI * (R - (useValue ? 13 : 0)) * (1 - c)}"/></svg>
-        <div class="gauge-val"><div><b data-count="${(c * 100).toFixed(0)}" data-suf="%">0%</b><small>${useValue ? "model" : "to win"}</small></div></div></div>
-      <div>${useValue ? `<div class="lock-position">Bet: ${esc(side.abbr)} moneyline ${ml(v.price)}</div>` : ""}
-        <div class="lock-team">${esc(side.name)}${useValue ? " to win" : ""}</div>
-        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)}${g.tip ? ` · ${tipLabel(g.tip)}` : ""}</div>
-        ${useValue ? `<div class="lock-ev"><b>+${(v.ev * 100).toFixed(1)}¢</b> expected per $1 staked</div>
-          <div class="lock-sub">$100 at ${ml(v.price)} returns $${(100 * payout(v.price)).toFixed(0)} profit if ${esc(side.abbr)} win<br>
-          needs ${pct(1 / (1 + payout(v.price)), 1)} to break even · model ${pct(v.p)} <span style="color:var(--orange)">●</span> · market ${pct(v.pm)} <span style="color:var(--slate)">●</span></div>` : ""}</div>
+        ${v ? `<circle cx="66" cy="66" r="${R}" fill="none" stroke="var(--slate)" stroke-width="11" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-dash="${C * (1 - breakEven)}" class="arc" opacity=".9"/>` : ""}
+        <circle class="arc" cx="66" cy="66" r="${r2}" fill="none" stroke="var(--orange)" stroke-width="11" stroke-linecap="round"
+          stroke-dasharray="${C2}" stroke-dashoffset="${C2}" data-dash="${C2 * (1 - c)}"/></svg>
+        <div class="gauge-val"><div><b data-count="${(c * 100).toFixed(0)}" data-suf="%">0%</b><small>${v ? "Tipoff" : "to win"}</small></div></div></div>
+      <div>${v ? `<div class="lock-position">Bet: ${esc(side.abbr)} moneyline ${ml(v.price)}</div>` : ""}
+        <div class="lock-team">${esc(side.name)}${v ? " to win" : ""}</div>
+        <div class="lock-sub">${side === g.home ? "vs" : "at"} ${esc(opp.name)}</div>
+      </div>
     </div>
-    ${lockResult(g, side, useValue ? v.price : null)}
-    ${useValue ? `<div class="lock-row"><span>Most likely winner</span><a href="${isToday(day) ? `#/game/${conf.id}` : `#/day/${day}`}">${esc(confSide.abbr)} ${pct(confidence(conf))} · ${esc(conf.away.abbr)} @ ${esc(conf.home.abbr)}${resultMark(conf, confSide)}</a></div>` : ""}
-    ${isToday(day) ? `<div class="lock-row" ${useValue ? 'style="border:0;padding-top:8px"' : ""}><span>Open this game</span><a href="#/game/${g.id}">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} →</a></div>
-    <div class="lock-row" style="border:0;padding-top:8px"><span>First tip</span><span class="countdown" data-tip-at="${esc(first || "")}">${tipLabel(first)}</span></div>` : ""}
+    ${v ? `<div class="lock-explain">
+      <div><span class="dotk" style="background:var(--orange)"></span>Tipoff gives ${esc(side.abbr)} <b>${pct(v.p, 1)}</b></div>
+      <div><span class="dotk" style="background:var(--slate)"></span>At ${ml(v.price)} they only need <b>${pct(breakEven, 1)}</b> to break even</div>
+    </div>` : ""}
+    ${lockResult(g, side)}
   </div>`;
+}
+
+function winnerCard(g, day) {
+  const side = g.p_home >= 0.5 ? g.home : g.away, opp = side === g.home ? g.away : g.home;
+  const w = winnerOf(g);
+  return `<a class="card winner-card ${w ? (w === side.abbr ? "won" : "lost") : ""}" href="${isToday(day) ? `#/game/${g.id}` : `#/day/${day}`}">
+    <span class="mono muted wc-label">Most likely winner</span>
+    <span class="wc-team">${badge(side.abbr, side.color)}<span><b>${esc(side.name)}</b><small class="muted">${side === g.home ? "vs" : "at"} ${esc(opp.name)}</small></span></span>
+    <b class="wc-pct">${pct(confidence(g))}</b>
+    ${w ? `<span class="verdict ${w === side.abbr ? "v-hit" : "v-miss"}"><i>${w === side.abbr ? "✓" : "✗"}</i>${w === side.abbr ? "Called it" : "Missed"}</span>` : ""}
+  </a>`;
+}
+
+/* redraw the hero picks when one of their games finishes (not on every score update) */
+function paintHeroPicks() {
+  const el = document.getElementById("hero-picks");
+  if (!el || !isToday(viewDay())) return;
+  const sig = D.slate.games.filter((g) => winnerOf(g)).map((g) => g.id).join();
+  if (sig === paintHeroPicks.sig) return;
+  paintHeroPicks.sig = sig;
+  el.innerHTML = heroPicks(D.slate.games, D.slate.date);
+  animateIn(el);
 }
 
 /* how a pick turned out: winner of a finished game, or null */
 const winnerOf = (g) => (g.live && g.live.state === "post" ? (g.live.hs > g.live.as ? g.home.abbr : g.away.abbr) : null);
 const resultMark = (g, side) => (winnerOf(g) ? (winnerOf(g) === side.abbr ? " ✓" : " ✗") : "");
 
-function lockResult(g, side, price) {
+function lockResult(g, side) {
   const w = winnerOf(g);
   if (!w) return "";
   const won = w === side.abbr;
-  const money = price == null ? "" : won ? ` · +$${(100 * payout(price)).toFixed(0)} on $100` : " · −$100";
-  return `<div class="lock-result ${won ? "won" : "lost"}"><i>${won ? "✓" : "✗"}</i>${won ? (price == null ? "Called it" : "Bet won") : (price == null ? "Missed" : "Bet lost")}${money}
+  return `<div class="lock-result ${won ? "won" : "lost"}"><i>${won ? "✓" : "✗"}</i>${won ? "Called it" : "Missed"}
     <span>final ${esc(g.away.abbr)} ${g.live.as} – ${g.live.hs} ${esc(g.home.abbr)}</span></div>`;
 }
 
@@ -489,27 +515,7 @@ function splitPanel(games) {
   </div>`;
 }
 
-function lastResults() {
-  const graded = D.record.picks.filter((p) => p.score);
-  if (!graded.length) {
-    const o = D.backtest.overall;
-    return `<div class="empty" style="padding:24px 8px">No games graded yet this season.<br>Backtest ${btSpan()}: <b>${pct(o.accuracy, 1)}</b> correct (${o.correct.toLocaleString()} of ${o.n.toLocaleString()}).</div>`;
-  }
-  const day = graded[0].date, rows = graded.filter((p) => p.date === day);
-  const hits = rows.filter(isHit).length;
-  return `<p class="mono muted" style="margin:0 0 8px">${dayLabel(day)} · ${hits}/${rows.length} correct · season ${D.record.season.correct}-${D.record.season.n - D.record.season.correct}</p>
-    <table><tbody>${rows.map(pickRow).join("")}</tbody></table>`;
-}
 const isHit = (p) => (p.p_home >= 0.5) === (p.score[1] > p.score[0]);
-function pickRow(p) {
-  const pick = p.p_home >= 0.5 ? p.home : p.away, conf = Math.max(p.p_home, 1 - p.p_home);
-  const res = p.score ? (isHit(p) ? `<span class="hit">✓</span>` : `<span class="miss">✗</span>`) : `<span class="muted mono">pending</span>`;
-  const mkt = p.p_market == null ? `<span class="muted">—</span>`
-    : `${pct(pick === p.home ? p.p_market : 1 - p.p_market)}${p.ml ? ` <span class="muted">${ml(pick === p.home ? p.ml[1] : p.ml[0])}</span>` : ""}`;
-  const tag = p.source === "backfill" ? ` <span class="tag" title="Before the site launched: predicted afterwards by a model trained only on earlier seasons">backfill</span>` : "";
-  return `<tr><td class="mono muted">${p.date.slice(5)}</td><td>${esc(p.away)} @ ${esc(p.home)}${tag}</td><td><b>${esc(pick)}</b> <span class="muted">${pct(conf)}</span></td>
-    <td class="mono">${mkt}</td><td class="mono">${p.score ? `${p.score[0]}–${p.score[1]}` : ""}</td><td class="r">${res}</td></tr>`;
-}
 
 function viewSlate() {
   const games = D.slate.games, rec = seasonRecord();
@@ -526,7 +532,7 @@ function viewSlate() {
         <div class="stat"><b id="season-rec">${rec.hit}–${rec.n - rec.hit}</b><span>record this season</span></div>
       </div>
     </div>
-    ${lockCard(currentGames(), viewDay())}
+    <div class="hero-picks" id="hero-picks">${heroPicks(currentGames(), viewDay())}</div>
   </section>
   ${D.custom ? `<div class="custom-banner card"><span><b>Showing your custom model</b> · ${esc(describe({ ...D.custom }))}</span><a href="#/lab">Edit in Model Lab →</a></div>` : ""}
   <section id="slate">
@@ -543,12 +549,6 @@ function viewSlate() {
     <div id="split-wrap">${splitPanel(currentGames())}</div>
     <div class="games">${currentGames() == null ? `<div class="card empty"><span class="bounce" style="display:inline-block;width:18px;height:18px"></span></div>`
       : filteredGames().map(gameCard).join("") || `<div class="card empty">No games match this filter.</div>`}</div>
-  </section>
-  <section class="two">
-    <div class="card panel"><div class="panel-head"><h3>Latest results</h3><a href="#/record">Full record →</a></div>${lastResults()}</div>
-    <div class="card panel"><div class="panel-head"><h3>Power rankings</h3><a href="#/rankings">All 30 →</a></div>
-      <table><tbody>${top.map((t) => `<tr><td class="mono muted" style="width:28px">${t.rank}</td><td><div class="tm">${badge(t.abbr, t.color)}${esc(t.name)}</div></td>
-        <td class="r" style="width:45%"><div class="bar-cell"><div class="track"><i data-w="${pct(t.power, 1)}"></i></div><span class="mono">${pct(t.power)}</span></div></td></tr>`).join("")}</tbody></table></div>
   </section>`;
 }
 
@@ -850,6 +850,7 @@ function bindRolling() {
 }
 
 function viewRecord() {
+  const rec = seasonRecord();          // same live count as the Today page
   const sea = D.record.season, live = D.record.live, o = D.backtest.overall, vm = D.backtest.vs_market, svm = D.record.vs_market || { n: 0 };
   const pending = D.record.picks.filter((p) => !p.score).length;
   const seasons = D.backtest.seasons.map((q) => q.season);
@@ -858,8 +859,8 @@ function viewRecord() {
   return `<section class="section-head" style="margin-bottom:20px"><div><h2>Track record</h2>
     <p>Every game since opening night of ${esc(D.meta.season)}, graded against the final score and the closing betting line. Picks published on the site are revisable until tipoff, then frozen. The ${nBack} games before the site launched${D.record.first_live ? ` (${dayLabel(D.record.first_live, { month: "short", day: "numeric" })})` : ""} are <b>backfilled</b>: predicted afterwards from pre-game data by a model trained only on earlier seasons. The backtest replays every season since ${esc(D.backtest.first)} the same way.</p></div></section>
   <section class="big-stats">
-    <div class="card big-stat"><span>${esc(D.meta.season)} record</span><b>${sea.n ? `${sea.correct}–${sea.n - sea.correct}` : "0–0"}</b><small>${sea.n ? `${pct(sea.accuracy, 1)} · ` : ""}${live.n || 0} live, ${nBack} backfilled · ${pending} pending</small></div>
-    <div class="card big-stat"><span>Season vs market</span><b>${svm.n ? `${pct(svm.model.accuracy, 0)} / ${pct(svm.market.accuracy, 0)}` : "—"}</b><small>${svm.n ? `model / betting favorite, ${svm.n} games` : "needs graded games with a line"}</small></div>
+    <div class="card big-stat"><span>${esc(D.meta.season)} record</span><b>${rec.hit}–${rec.n - rec.hit}</b><small>${rec.n ? `${pct(rec.hit / rec.n, 1)} right · ` : ""}${nBack} backfilled · ${pending} pending</small></div>
+    <div class="card big-stat"><span>Season vs market</span><b>${rec.n ? pct(rec.hit / rec.n, 1) : "—"} <span class="mkt-stat">/ ${rec.mN ? pct(rec.mHit / rec.mN, 1) : "—"}</span></b><small>Tipoff / betting favorite, same as the Today page, incl. tonight</small></div>
     <div class="card big-stat"><span>Backtest ${btSpan()}</span><b data-count="${(o.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%">0</b><small>${o.correct.toLocaleString()} of ${o.n.toLocaleString()} games</small></div>
     <div class="card big-stat"><span>Market, same games</span><b ${vm.n ? `data-count="${(vm.market.accuracy * 100).toFixed(1)}" data-dec="1" data-suf="%"` : ""}>${vm.n ? "0" : "—"}</b><small>${vm.n ? `model ${pct(vm.model.accuracy, 1)} on these ${vm.n.toLocaleString()}` : "no lines"}</small></div>
   </section>
@@ -1009,7 +1010,13 @@ document.addEventListener("click", (e) => {
     rerenderGames();
     return;
   }
-  if (t.closest(".close")) { state.open = null; history.replaceState(null, "", "#/"); rerenderGames(); return; }
+  const openCard = t.closest(".game.open");
+  if (openCard && !t.closest(".detail, a, button, input, select")) {        // click the card again to close it
+    state.open = null;
+    if (isToday(viewDay())) history.replaceState(null, "", "#/");
+    rerenderGames();
+    return;
+  }
   const card = t.closest(".game");
   if (card && card.classList.contains("lite")) return;
   if (card && !card.classList.contains("open")) {

@@ -114,7 +114,6 @@ h3 { font: 600 15px var(--font); margin: 0; }
 .game { padding: 16px 16px 14px; cursor: pointer; transition: transform .2s, border-color .2s; position: relative; }
 .game:hover { transform: translateY(-2px); border-color: var(--ink-2); }
 .game.open { grid-column: 1 / -1; cursor: default; transform: none; }
-.game.open .game-top { padding-right: 38px; }
 .game-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .tag { font: 500 11px var(--mono); padding: 2px 7px; border-radius: 6px; background: var(--card-2); color: var(--ink-2); }
 .tag.hot { background: var(--orange); color: #fff; }
@@ -487,3 +486,39 @@ td.r, th.r { text-align: right; }
 .pl.Doubtful .pl-name { color: var(--muted); }
 .mkt-stat { color: var(--slate); }
 .day-chip .live-dot { width: 6px; height: 6px; vertical-align: 1px; }
+
+/* hero picks */
+.hero-picks { display: grid; gap: 12px; align-content: start; }
+.lock-explain { display: grid; gap: 6px; margin: 0 0 14px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .06); font-size: 13.5px; }
+.lock-explain b { font-weight: 700; }
+.dotk { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+.lock-payoff { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .1); font: 12.5px var(--mono); }
+.lock-payoff .up { color: #7fd47a; }
+.lock-payoff .down { color: #f08a83; }
+.winner-card { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "label pct" "team pct" "verdict verdict"; gap: 4px 12px; align-items: center; padding: 14px 16px; transition: transform .15s; }
+.winner-card:hover { transform: translateY(-2px); }
+.wc-label { grid-area: label; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.wc-team { grid-area: team; display: flex; align-items: center; gap: 10px; }
+.wc-team small { display: block; font-size: 12px; }
+.wc-team .badge { width: 34px; height: 34px; }
+.wc-pct { grid-area: pct; font: 800 30px var(--display); }
+.winner-card .verdict { grid-area: verdict; justify-self: start; margin: 6px 0 0; }
+.winner-card.won { border-color: var(--good); box-shadow: inset 4px 0 0 var(--good), var(--shadow); }
+.winner-card.lost { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad), var(--shadow); }
+
+/* finished games: score + verdict */
+.compact-final { padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.fc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.verdict.big { font-size: 15px; padding: 7px 14px 7px 7px; }
+.verdict.big i { width: 26px; height: 26px; font-size: 15px; }
+.fc-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; color: var(--muted); }
+.fc-row .badge { width: 32px; height: 32px; font-size: 10px; opacity: .75; }
+.fc-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-pts { font: 600 26px var(--display); font-variant-numeric: tabular-nums; }
+.fc-row.win { color: var(--ink); }
+.fc-row.win .badge { opacity: 1; }
+.fc-row.win .fc-pts { font-weight: 800; }
+.fc-sub { font-size: 12px; color: var(--muted); margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line-2); }
+.fc-sub b { color: var(--ink-2); font-weight: 500; }
+.compact-final.open { grid-template-columns: none; }
+.game.open > :not(.detail) { cursor: pointer; }

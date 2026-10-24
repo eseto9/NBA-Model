@@ -144,6 +144,10 @@ function paintLive(g) {
   if (typeof viewDay === "function" && !isToday(viewDay())) return;
   const card = document.querySelector(`[data-game="${g.id}"]`);
   if (!card) return;
+  if (g.live && g.live.state === "post") {             // swap to the compact final card once
+    if (!card.classList.contains("compact-final")) { card.outerHTML = gameCard(g); }
+    return;
+  }
   const slot = card.querySelector(".live-slot");
   if (slot) slot.innerHTML = liveBlock(g);
   if (!g.live || g.live.state === "pre" || g.live.p == null) return;
@@ -180,6 +184,7 @@ function paintTonight() {
   }
   const split = document.getElementById("split-wrap");
   if (split && typeof splitPanel === "function" && isToday(viewDay())) split.innerHTML = splitPanel(D.slate.games);
+  if (typeof paintHeroPicks === "function") paintHeroPicks();
   const chip = document.getElementById("today-chip");
   if (chip && typeof todayChipText === "function") {
     chip.innerHTML = todayChipText(D.slate.date === new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
